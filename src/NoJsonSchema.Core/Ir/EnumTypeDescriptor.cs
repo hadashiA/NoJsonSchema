@@ -16,7 +16,7 @@ public sealed class EnumMember
 /// A schema mapped to a closed C# <c>enum</c> with parser/emitter overlay.
 /// Open enums (DAP's <c>_enum</c> extension) are not lowered to this — they stay as plain strings.
 /// </summary>
-public sealed class EnumTypeDescriptor : TypeDescriptor
+public sealed record EnumTypeDescriptor : TypeDescriptor
 {
     /// <summary>Currently only <see cref="PrimitiveKind.String"/> is supported.</summary>
     public required PrimitiveKind Underlying { get; init; }

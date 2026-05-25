@@ -25,6 +25,8 @@ public sealed class TypeGraphBuilder
     readonly Dictionary<string, TypeRef> primitiveAliases = new(StringComparer.Ordinal);
     /// <summary>C# type names requested to materialise as <see cref="TypeStyle.ReadonlyRecordStruct"/>.</summary>
     HashSet<string> valueObjectTypes = new(StringComparer.Ordinal);
+    /// <summary>Polymorphic base name → list of branch C# type names that need their BaseTypeName retro-fitted.</summary>
+    readonly Dictionary<string, List<string>> polymorphicBranchTypeNames = new(StringComparer.Ordinal);
 
     /// <summary>
     /// Build a graph from <paramref name="document"/>. Names reserved via <paramref name="reservedNames"/>
@@ -72,6 +74,7 @@ public sealed class TypeGraphBuilder
         // Resolve the root reference. If the root itself is an inline object, it produces a fresh type.
         var rootRef = BuildTypeRef(document.Root, contextHint: "Root");
 
+        RetrofitPolymorphicBases();
         ValidateValueObjectConstraints();
 
         return new TypeGraph
@@ -84,6 +87,34 @@ public sealed class TypeGraphBuilder
     [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
     TypeStyle StyleFor(string typeName)
         => valueObjectTypes.Contains(typeName) ? TypeStyle.ReadonlyRecordStruct : TypeStyle.Class;
+
+    /// <summary>
+    /// For every polymorphic base discovered in Pass 2, rewrite each branch's <c>BaseTypeName</c>
+    /// to point at the base. Branches were registered before the base existed, so we patch them
+    /// here in place via record-with.
+    /// </summary>
+    void RetrofitPolymorphicBases()
+    {
+        foreach (var (baseName, branchNames) in polymorphicBranchTypeNames)
+        {
+            foreach (var branchName in branchNames)
+            {
+                if (!descriptors.TryGetValue(branchName, out var d) || d is not ObjectTypeDescriptor branch)
+                {
+                    throw new SchemaLoadException(
+                        $"Polymorphic base '{baseName}' references branch '{branchName}' which is not an object type.",
+                        branchName);
+                }
+                if (branch.BaseTypeName is not null && branch.BaseTypeName != baseName)
+                {
+                    throw new SchemaLoadException(
+                        $"Branch '{branchName}' already inherits '{branch.BaseTypeName}' — cannot also extend polymorphic base '{baseName}'.",
+                        branch.SourcePointer);
+                }
+                descriptors[branchName] = branch with { BaseTypeName = baseName };
+            }
+        }
+    }
 
     /// <summary>
     /// After Pass 2 finishes, scan the graph for value-object types that are also referenced as a
@@ -131,6 +162,13 @@ public sealed class TypeGraphBuilder
         if (IsStringEnum(schema, out var enumValues))
         {
             return BuildEnumDescriptor(name, schema, enumValues);
+        }
+
+        // OpenAPI / discriminator-driven polymorphism: oneOf + discriminator → abstract base type.
+        if (schema.OneOf.Count > 0 && schema.Discriminator is not null
+            && TryBuildPolymorphicDescriptor(name, schema, out var polyDesc))
+        {
+            return polyDesc;
         }
 
         if (schema.AllOf.Count > 0 && TryBuildAllOfDescriptor(name, schema, out var allOfDesc))
@@ -339,6 +377,78 @@ public sealed class TypeGraphBuilder
             AdditionalPropertiesDenied = denied,
         };
         return true;
+    }
+
+    /// <summary>
+    /// Build an abstract base ObjectTypeDescriptor for a <c>oneOf + discriminator</c> family.
+    /// All branches must be <c>$ref</c>s; their descriptors get their <c>BaseTypeName</c> retro-fitted
+    /// to the new polymorphic base during post-processing.
+    /// </summary>
+    bool TryBuildPolymorphicDescriptor(string name, SchemaNode schema, out TypeDescriptor descriptor)
+    {
+        descriptor = null!;
+        var disc = schema.Discriminator;
+        if (disc is null) return false;
+
+        // Collect (discriminator value, target type name) for each branch.
+        var branches = new List<PolymorphicBranch>(schema.OneOf.Count);
+        var branchTypeNames = new List<string>(schema.OneOf.Count);
+
+        // Helper: derive a discriminator value for the given $ref. Explicit mapping wins; otherwise
+        // we fall back to the PascalCase short name (so "#/components/schemas/Cat" → "Cat").
+        foreach (var branch in schema.OneOf)
+        {
+            if (branch.Ref is null) return false; // every branch must be a $ref for now
+
+            // Resolve to the C# type name.
+            var typeName = refs.ResolveToName(branch.Ref, branch.Pointer);
+            branchTypeNames.Add(typeName);
+
+            // Find the discriminator value: from explicit mapping if present, else by-name.
+            string? discValue = null;
+            if (disc.Mapping is not null)
+            {
+                foreach (var kv in disc.Mapping)
+                {
+                    if (string.Equals(kv.Value, branch.Ref, StringComparison.Ordinal))
+                    {
+                        discValue = kv.Key;
+                        break;
+                    }
+                }
+            }
+            discValue ??= ShortNameFromRef(branch.Ref);
+
+            branches.Add(new PolymorphicBranch
+            {
+                DiscriminatorValue = discValue,
+                TypeName = typeName,
+            });
+        }
+
+        polymorphicBranchTypeNames[name] = branchTypeNames;
+
+        descriptor = new ObjectTypeDescriptor
+        {
+            Name = name,
+            Style = StyleFor(name),
+            SourcePointer = schema.Pointer,
+            Description = schema.Description,
+            Deprecated = schema.Deprecated,
+            IsAbstract = true,
+            Polymorphic = new PolymorphicInfo
+            {
+                DiscriminatorJsonName = disc.PropertyName,
+                Branches = branches,
+            },
+        };
+        return true;
+    }
+
+    static string ShortNameFromRef(string refString)
+    {
+        var slash = refString.LastIndexOf('/');
+        return slash < 0 ? refString : refString[(slash + 1)..];
     }
 
     EnumTypeDescriptor BuildEnumDescriptor(string name, SchemaNode schema, List<string> values)

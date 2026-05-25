@@ -85,6 +85,9 @@ public sealed class SchemaNode
     public IReadOnlyList<SchemaNode> AnyOf { get; init; } = [];
     public SchemaNode? Not { get; init; }
 
+    /// <summary>OpenAPI <c>discriminator</c> block, when present.</summary>
+    public DiscriminatorRaw? Discriminator { get; init; }
+
     // --- Defaults / examples ---
     public JsonValue? Default { get; init; }
     public IReadOnlyList<JsonValue> Examples { get; init; } = [];

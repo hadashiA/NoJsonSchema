@@ -1,6 +1,6 @@
 namespace NoJsonSchema.Core.Ir;
 
-public sealed class ObjectTypeDescriptor : TypeDescriptor
+public sealed record ObjectTypeDescriptor : TypeDescriptor
 {
     /// <summary>
     /// C# materialisation style for this type. Defaults to the project-wide
@@ -14,8 +14,15 @@ public sealed class ObjectTypeDescriptor : TypeDescriptor
     /// </summary>
     public string? BaseTypeName { get; init; }
 
-    /// <summary>True when this type acts as the abstract base of a polymorphic family (future oneOf+discriminator).</summary>
+    /// <summary>True when this type acts as the abstract base of a polymorphic family.</summary>
     public bool IsAbstract { get; init; }
+
+    /// <summary>
+    /// When set, this type is the base of a discriminated polymorphic family
+    /// (<c>oneOf + discriminator</c>). The Formatter for this type peeks the discriminator field
+    /// and dispatches to the matching branch.
+    /// </summary>
+    public PolymorphicInfo? Polymorphic { get; init; }
 
     public IReadOnlyList<PropertyDescriptor> Properties { get; init; } = [];
 

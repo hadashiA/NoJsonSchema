@@ -31,8 +31,18 @@ public static class FormatterEmitter
         w.WriteLine();
 
         var formatterName = type.Name + "Formatter";
-        var allProps = FlattenProperties(type, graph);
         var ctx = new EmitContext(graph);
+
+        if (type.Polymorphic is not null)
+        {
+            using (w.Block($"public static partial class {NameFactory.EscapeIfReserved(formatterName)}"))
+            {
+                EmitPolymorphicBody(w, type);
+            }
+            return w.ToString();
+        }
+
+        var allProps = FlattenProperties(type, graph);
 
         using (w.Block($"public static partial class {NameFactory.EscapeIfReserved(formatterName)}"))
         {
@@ -62,6 +72,62 @@ public static class FormatterEmitter
         }
 
         return w.ToString();
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Polymorphic dispatch: peek a discriminator field, then forward to the matching branch.
+    // ---------------------------------------------------------------------------------------------
+
+    static void EmitPolymorphicBody(SourceWriter w, ObjectTypeDescriptor type)
+    {
+        var poly = type.Polymorphic!;
+        var discLiteral = EncodeUtf8Literal(EscapeJsonString(poly.DiscriminatorJsonName));
+        w.WriteLine($"static global::System.ReadOnlySpan<byte> DiscriminatorName => {discLiteral};");
+        w.WriteLine();
+
+        using (w.Block($"public static {type.Name} Deserialize(global::System.ReadOnlySpan<byte> utf8Json, NoJsonSerializerOptions? options = null)"))
+        {
+            w.WriteLine("options ??= NoJsonSerializerOptions.Default;");
+            w.WriteLine("var tokenizer = new Utf8JsonTokenizer(utf8Json);");
+            w.WriteLine("tokenizer.ReadStartObject();");
+            w.WriteLine($"if (!tokenizer.TryPeekDiscriminator(DiscriminatorName, out var __disc)) throw new NoJsonFormatException(\"Missing discriminator '{poly.DiscriminatorJsonName}' on " + type.Name + "\", tokenizer.Position);");
+            foreach (var b in poly.Branches)
+            {
+                var valueLiteral = EncodeUtf8Literal(EscapeJsonString(b.DiscriminatorValue));
+                using (w.Block($"if (__disc.SequenceEqual({valueLiteral}))"))
+                {
+                    w.WriteLine($"var v = new {b.TypeName}();");
+                    w.WriteLine($"{b.TypeName}Formatter.ReadInto(ref tokenizer, v, options);");
+                    w.WriteLine("return v;");
+                }
+            }
+            w.WriteLine("throw new NoJsonFormatException(\"Unknown discriminator value '\" + global::System.Text.Encoding.UTF8.GetString(__disc) + \"' on " + type.Name + "\", tokenizer.Position);");
+        }
+
+        w.WriteLine();
+        w.WriteLine($"public static {type.Name} Deserialize(byte[] utf8Json, NoJsonSerializerOptions? options = null) => Deserialize((global::System.ReadOnlySpan<byte>)utf8Json, options);");
+        w.WriteLine();
+
+        using (w.Block($"public static void Serialize(global::System.Buffers.IBufferWriter<byte> writer, {type.Name} value, NoJsonSerializerOptions? options = null)"))
+        {
+            w.WriteLine("options ??= NoJsonSerializerOptions.Default;");
+            using (w.Block("switch (value)"))
+            {
+                foreach (var b in poly.Branches)
+                {
+                    w.WriteLine($"case {b.TypeName} __sub: {b.TypeName}Formatter.Serialize(writer, __sub, options); return;");
+                }
+                w.WriteLine("default: throw new global::System.InvalidOperationException(\"Unknown " + type.Name + " subtype: \" + value.GetType());");
+            }
+        }
+
+        w.WriteLine();
+        using (w.Block($"public static byte[] SerializeToUtf8Bytes({type.Name} value, NoJsonSerializerOptions? options = null)"))
+        {
+            w.WriteLine("var buffer = new global::System.Buffers.ArrayBufferWriter<byte>(256);");
+            w.WriteLine("Serialize(buffer, value, options);");
+            w.WriteLine("return buffer.WrittenSpan.ToArray();");
+        }
     }
 
     // ---------------------------------------------------------------------------------------------

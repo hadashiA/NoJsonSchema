@@ -42,6 +42,13 @@ public static class JsonSchemaLoader
 
     static JsonSchemaDocument Build(JsonElement root, string? sourcePath)
     {
+        // OpenAPI documents (3.0 / 3.1) put their type definitions under components.schemas — lift
+        // them up as if they were JSON Schema $defs so the rest of the pipeline is identical.
+        if (IsOpenApiDocument(root))
+        {
+            return BuildFromOpenApi(root, sourcePath);
+        }
+
         string? dialect = null;
         string? id = null;
         if (root.ValueKind == JsonValueKind.Object)
@@ -59,6 +66,48 @@ public static class JsonSchemaLoader
             Root = rootNode,
             Dialect = dialect,
             Id = id,
+            SourcePath = sourcePath,
+        };
+    }
+
+    static bool IsOpenApiDocument(JsonElement root)
+    {
+        return root.ValueKind == JsonValueKind.Object
+            && root.TryGetProperty("openapi", out var version)
+            && version.ValueKind == JsonValueKind.String;
+    }
+
+    static JsonSchemaDocument BuildFromOpenApi(JsonElement root, string? sourcePath)
+    {
+        var defs = new Dictionary<string, SchemaNode>(StringComparer.Ordinal);
+        if (root.TryGetProperty("components", out var components)
+            && components.ValueKind == JsonValueKind.Object
+            && components.TryGetProperty("schemas", out var schemas)
+            && schemas.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var p in schemas.EnumerateObject())
+            {
+                // Keep the original OpenAPI pointer ("#/components/schemas/Foo") so any internal
+                // $ref resolves naturally — the RefResolver is pointer-keyed, not name-keyed.
+                var ptr = "#/components/schemas/" + p.Name;
+                defs[p.Name] = LoadNode(p.Value, ptr);
+            }
+        }
+
+        var dialect = root.TryGetProperty("openapi", out var v) && v.ValueKind == JsonValueKind.String
+            ? "openapi-" + v.GetString()
+            : "openapi";
+
+        var rootNode = new SchemaNode
+        {
+            Pointer = JsonPointer.Root,
+            Defs = defs,
+        };
+
+        return new JsonSchemaDocument
+        {
+            Root = rootNode,
+            Dialect = dialect,
             SourcePath = sourcePath,
         };
     }
@@ -116,12 +165,17 @@ public static class JsonSchemaLoader
         IReadOnlyList<SchemaNode>? oneOf = null;
         IReadOnlyList<SchemaNode>? anyOf = null;
         SchemaNode? not = null;
+        DiscriminatorRaw? discriminator = null;
 
         JsonValue? @default = null;
         IReadOnlyList<JsonValue>? examples = null;
 
         Dictionary<string, SchemaNode>? defs = null;
         Dictionary<string, JsonValue>? extensions = null;
+
+        // OpenAPI 3.0 expresses null-allowance as a sibling 'nullable: true' rather than adding
+        // "null" to the type array — fold it into the type set on load.
+        var openApiNullable = false;
 
         foreach (var p in element.EnumerateObject())
         {
@@ -137,6 +191,9 @@ public static class JsonSchemaLoader
 
                 // Reference
                 case "$ref":         @ref = ReadString(p.Value, pointer, p.Name); break;
+
+                // OpenAPI 3.0 extension — normalised below.
+                case "nullable":     openApiNullable = ReadBool(p.Value, pointer, p.Name); break;
 
                 // Type
                 case "type":
@@ -194,6 +251,11 @@ public static class JsonSchemaLoader
                 case "anyOf": anyOf = ReadNodeArray(p.Value, JsonPointer.Append(pointer, "anyOf")); break;
                 case "not":   not = LoadNode(p.Value, JsonPointer.Append(pointer, "not")); break;
 
+                // OpenAPI discriminator (only meaningful alongside oneOf/anyOf/allOf).
+                case "discriminator":
+                    discriminator = ReadDiscriminator(p.Value, JsonPointer.Append(pointer, "discriminator"));
+                    break;
+
                 // Defaults / examples
                 case "default":  @default = ReadValue(p.Value); break;
                 case "examples": examples = ReadValueArray(p.Value, JsonPointer.Append(pointer, "examples")); break;
@@ -214,6 +276,15 @@ public static class JsonSchemaLoader
                     extensions[p.Name] = ReadValue(p.Value);
                     break;
             }
+        }
+
+        // OpenAPI nullable: append "null" to the type set if a real type was declared.
+        if (openApiNullable && types is not null && !ContainsNull(types))
+        {
+            var augmented = new List<JsonSchemaType>(types.Count + 1);
+            augmented.AddRange(types);
+            augmented.Add(JsonSchemaType.Null);
+            types = augmented;
         }
 
         return new SchemaNode
@@ -249,11 +320,58 @@ public static class JsonSchemaLoader
             OneOf = oneOf ?? [],
             AnyOf = anyOf ?? [],
             Not = not,
+            Discriminator = discriminator,
             Default = @default,
             Examples = examples ?? [],
             Defs = defs ?? SchemaNode.EmptyProperties,
             Extensions = extensions ?? SchemaNode.EmptyExtensions,
         };
+    }
+
+    static DiscriminatorRaw ReadDiscriminator(JsonElement element, string pointer)
+    {
+        if (element.ValueKind != JsonValueKind.Object)
+        {
+            throw new SchemaLoadException("'discriminator' must be an object.", pointer);
+        }
+
+        string? propertyName = null;
+        Dictionary<string, string>? mapping = null;
+        foreach (var p in element.EnumerateObject())
+        {
+            switch (p.Name)
+            {
+                case "propertyName":
+                    propertyName = ReadString(p.Value, pointer, p.Name);
+                    break;
+                case "mapping":
+                    if (p.Value.ValueKind != JsonValueKind.Object)
+                        throw new SchemaLoadException("'mapping' must be an object.", JsonPointer.Append(pointer, "mapping"));
+                    mapping = new Dictionary<string, string>(StringComparer.Ordinal);
+                    foreach (var m in p.Value.EnumerateObject())
+                    {
+                        if (m.Value.ValueKind != JsonValueKind.String)
+                            throw new SchemaLoadException("Mapping entry must be a string.", JsonPointer.Append(pointer, "mapping/" + m.Name));
+                        mapping[m.Name] = m.Value.GetString()!;
+                    }
+                    break;
+            }
+        }
+
+        if (propertyName is null)
+        {
+            throw new SchemaLoadException("'discriminator' requires 'propertyName'.", pointer);
+        }
+        return new DiscriminatorRaw { PropertyName = propertyName, Mapping = mapping };
+    }
+
+    static bool ContainsNull(IReadOnlyList<JsonSchemaType> types)
+    {
+        foreach (var t in types)
+        {
+            if (t == JsonSchemaType.Null) return true;
+        }
+        return false;
     }
 
     static IReadOnlyList<JsonSchemaType> ReadTypes(JsonElement element, string pointer)
