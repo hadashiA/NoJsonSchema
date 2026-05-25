@@ -5,5 +5,5 @@ namespace Dap;
 
 public partial class ScopesRequest : Request
 {
-    public new ScopesArguments Arguments { get; set; }
+    public new ScopesArguments Arguments { get; set; } = default!;
 }

@@ -45,4 +45,10 @@ public sealed class GenerationOptions
     /// SemVer, coordinates, etc.
     /// </summary>
     public HashSet<string> ValueObjectTypes { get; init; } = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// Emit the C# 11+ <c>required</c> modifier on non-nullable required properties (replaces the
+    /// <c>= default!;</c> suppression). Requires consumers to target a C# 11-aware compiler.
+    /// </summary>
+    public bool UseRequiredModifier { get; init; }
 }

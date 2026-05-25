@@ -8,7 +8,7 @@ public partial class ModulesResponseBody
     /// <summary>
     /// All modules or range of modules.
     /// </summary>
-    public Module[] Modules { get; set; }
+    public Module[] Modules { get; set; } = default!;
     
     /// <summary>
     /// The total number of modules available.

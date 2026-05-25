@@ -8,5 +8,5 @@ public partial class ScopesResponseBody
     /// <summary>
     /// The scopes of the stack frame. If the array has length zero, there are no scopes available.
     /// </summary>
-    public Scope[] Scopes { get; set; }
+    public Scope[] Scopes { get; set; } = default!;
 }

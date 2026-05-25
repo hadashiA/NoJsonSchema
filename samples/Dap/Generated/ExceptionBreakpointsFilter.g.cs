@@ -11,12 +11,12 @@ public partial class ExceptionBreakpointsFilter
     /// <summary>
     /// The internal ID of the filter option. This value is passed to the `setExceptionBreakpoints` request.
     /// </summary>
-    public string Filter { get; set; }
+    public string Filter { get; set; } = default!;
     
     /// <summary>
     /// The name of the filter option. This is shown in the UI.
     /// </summary>
-    public string Label { get; set; }
+    public string Label { get; set; } = default!;
     
     /// <summary>
     /// A help text providing additional information about the exception filter. This string is typically shown as a hover and can be translated.

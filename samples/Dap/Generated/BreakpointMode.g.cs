@@ -11,12 +11,12 @@ public partial class BreakpointMode
     /// <summary>
     /// The internal ID of the mode. This value is passed to the `setBreakpoints` request.
     /// </summary>
-    public string Mode { get; set; }
+    public string Mode { get; set; } = default!;
     
     /// <summary>
     /// The name of the breakpoint mode. This is shown in the UI.
     /// </summary>
-    public string Label { get; set; }
+    public string Label { get; set; } = default!;
     
     /// <summary>
     /// A help text providing additional information about the breakpoint mode. This string is typically shown as a hover and can be translated.
@@ -26,5 +26,5 @@ public partial class BreakpointMode
     /// <summary>
     /// Describes one or more type of breakpoint this mode applies to.
     /// </summary>
-    public string[] AppliesTo { get; set; }
+    public string[] AppliesTo { get; set; } = default!;
 }

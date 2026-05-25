@@ -5,8 +5,6 @@
     <TargetFramework>net10.0</TargetFramework>
     <IsPackable>false</IsPackable>
     <RootNamespace>NoJsonSchema.Benchmarks</RootNamespace>
-    <!-- Generated code triggers a few diagnostics (e.g. unused locals from ref struct ops). -->
-    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
   </PropertyGroup>
 
   <ItemGroup>

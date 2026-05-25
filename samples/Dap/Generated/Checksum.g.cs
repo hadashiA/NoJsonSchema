@@ -11,10 +11,10 @@ public partial class Checksum
     /// <summary>
     /// The algorithm used to calculate this checksum.
     /// </summary>
-    public ChecksumAlgorithm Algorithm { get; set; }
+    public ChecksumAlgorithm Algorithm { get; set; } = default!;
     
     /// <summary>
     /// Value of the checksum, encoded as a hexadecimal value.
     /// </summary>
-    public string ChecksumValue { get; set; }
+    public string ChecksumValue { get; set; } = default!;
 }

@@ -16,7 +16,7 @@ public partial class StepInTarget
     /// <summary>
     /// The name of the step-in target (shown in the UI).
     /// </summary>
-    public string Label { get; set; }
+    public string Label { get; set; } = default!;
     
     /// <summary>
     /// The line of the step-in target.

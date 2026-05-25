@@ -5,5 +5,5 @@ namespace Dap;
 
 public partial class RestartFrameRequest : Request
 {
-    public new RestartFrameArguments Arguments { get; set; }
+    public new RestartFrameArguments Arguments { get; set; } = default!;
 }

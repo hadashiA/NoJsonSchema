@@ -8,7 +8,7 @@ public partial class SourceResponseBody
     /// <summary>
     /// Content of the source reference.
     /// </summary>
-    public string Content { get; set; }
+    public string Content { get; set; } = default!;
     
     /// <summary>
     /// Content type (MIME type) of the source.

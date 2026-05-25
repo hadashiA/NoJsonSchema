@@ -1,0 +1,33 @@
+<Project>
+
+  <!--
+    Expose per-file metadata to the source generator. Users declare schemas like:
+
+      <ItemGroup>
+        <AdditionalFiles Include="schema.json">
+          <NoJsonSchemaNamespace>MyApp.Models</NoJsonSchemaNamespace>
+          <NoJsonSchemaValueObjects>SemVer;Color</NoJsonSchemaValueObjects>
+        </AdditionalFiles>
+      </ItemGroup>
+
+    or set defaults globally via MSBuild properties:
+
+      <PropertyGroup>
+        <NoJsonSchemaNamespace>MyApp.Models</NoJsonSchemaNamespace>
+      </PropertyGroup>
+  -->
+  <ItemGroup>
+    <CompilerVisibleItemMetadata Include="AdditionalFiles" MetadataName="NoJsonSchemaNamespace" />
+    <CompilerVisibleItemMetadata Include="AdditionalFiles" MetadataName="NoJsonSchemaValueObjects" />
+    <CompilerVisibleItemMetadata Include="AdditionalFiles" MetadataName="NoJsonSchemaTypeStyle" />
+    <CompilerVisibleItemMetadata Include="AdditionalFiles" MetadataName="NoJsonSchemaStrictExtraProperties" />
+    <CompilerVisibleItemMetadata Include="AdditionalFiles" MetadataName="NoJsonSchemaUseRequired" />
+
+    <CompilerVisibleProperty Include="NoJsonSchemaNamespace" />
+    <CompilerVisibleProperty Include="NoJsonSchemaValueObjects" />
+    <CompilerVisibleProperty Include="NoJsonSchemaTypeStyle" />
+    <CompilerVisibleProperty Include="NoJsonSchemaStrictExtraProperties" />
+    <CompilerVisibleProperty Include="NoJsonSchemaUseRequired" />
+  </ItemGroup>
+
+</Project>

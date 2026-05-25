@@ -20,7 +20,7 @@ public partial class Response : ProtocolMessage
     /// <summary>
     /// The command requested.
     /// </summary>
-    public string Command { get; set; }
+    public string Command { get; set; } = default!;
     
     /// <summary>
     /// Contains the raw error in short form if `success` is false.

@@ -8,5 +8,5 @@ public partial class BreakpointLocationsResponseBody
     /// <summary>
     /// Sorted set of possible breakpoint locations.
     /// </summary>
-    public BreakpointLocation[] Breakpoints { get; set; }
+    public BreakpointLocation[] Breakpoints { get; set; } = default!;
 }

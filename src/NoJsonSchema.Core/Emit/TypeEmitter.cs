@@ -8,16 +8,16 @@ namespace NoJsonSchema.Core.Emit;
 /// </summary>
 public static class TypeEmitter
 {
-    public static string Emit(ObjectTypeDescriptor type, GenerationOptions options)
+    public static string Emit(ObjectTypeDescriptor type, TypeGraph graph, GenerationOptions options)
     {
         if (type.Style == TypeStyle.ReadonlyRecordStruct)
         {
             return EmitRecordStruct(type, options);
         }
-        return EmitClassOrRecord(type, options);
+        return EmitClassOrRecord(type, graph, options);
     }
 
-    static string EmitClassOrRecord(ObjectTypeDescriptor type, GenerationOptions options)
+    static string EmitClassOrRecord(ObjectTypeDescriptor type, TypeGraph graph, GenerationOptions options)
     {
         var w = new SourceWriter();
         WriteFileHeader(w);
@@ -32,14 +32,42 @@ public static class TypeEmitter
             : " : " + NameFactory.EscapeIfReserved(type.BaseTypeName);
         using (w.Block($"public {modifier}{keyword} {NameFactory.EscapeIfReserved(type.Name)}{inheritance}"))
         {
+            if (options.UseRequiredModifier && HasAnyRequired(type))
+            {
+                EmitSetsRequiredMembersCtor(w, type);
+                if (type.Properties.Count > 0) w.WriteLine();
+            }
+
             for (var i = 0; i < type.Properties.Count; i++)
             {
                 if (i > 0) w.WriteLine();
-                EmitProperty(w, type.Properties[i], options.TypeStyle);
+                EmitProperty(w, type.Properties[i], options.TypeStyle, options, graph);
             }
         }
 
         return w.ToString();
+    }
+
+    static bool HasAnyRequired(ObjectTypeDescriptor type)
+    {
+        foreach (var p in type.Properties)
+        {
+            if (p.IsRequired && !p.IsNullable) return true;
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// When the user opts into the C# 11 <c>required</c> modifier, the formatter still needs a
+    /// parameterless ctor to instantiate the type before populating the required members. Emit one
+    /// annotated with <c>[SetsRequiredMembers]</c> so the compiler treats it as safe.
+    /// </summary>
+    static void EmitSetsRequiredMembersCtor(SourceWriter w, ObjectTypeDescriptor type)
+    {
+        var visibility = type.IsAbstract ? "protected" : "public";
+        var baseCall = type.BaseTypeName is null ? "" : " : base()";
+        w.WriteLine("[global::System.Diagnostics.CodeAnalysis.SetsRequiredMembers]");
+        w.WriteLine($"{visibility} {NameFactory.EscapeIfReserved(type.Name)}(){baseCall} {{ }}");
     }
 
     /// <summary>
@@ -121,15 +149,53 @@ public static class TypeEmitter
         w.WriteLine("/// </summary>");
     }
 
-    static void EmitProperty(SourceWriter w, PropertyDescriptor p, TypeStyle style)
+    static void EmitProperty(SourceWriter w, PropertyDescriptor p, TypeStyle style, GenerationOptions options, TypeGraph graph)
     {
         EmitXmlDoc(w, p.Description);
         var typeExpr = RenderPropertyType(p);
         var name = NameFactory.EscapeIfReserved(p.Name);
         var accessors = style == TypeStyle.Record ? "{ get; init; }" : "{ get; set; }";
-        var modifier = p.HidesBaseProperty ? "new " : "";
-        w.WriteLine($"public {modifier}{typeExpr} {name} {accessors}");
+        var hiding = p.HidesBaseProperty ? "new " : "";
+
+        var isRequiredNonNull = p.IsRequired && !p.IsNullable;
+        var initializer = "";
+        var requiredModifier = "";
+
+        if (isRequiredNonNull)
+        {
+            if (options.UseRequiredModifier)
+            {
+                requiredModifier = "required ";
+            }
+            else if (!IsValueTypeReference(p.Type, graph))
+            {
+                // CS8618 suppression for non-nullable reference-typed properties.
+                initializer = " = null!;";
+            }
+        }
+
+        w.WriteLine($"public {hiding}{requiredModifier}{typeExpr} {name} {accessors}{initializer}");
     }
+
+    /// <summary>
+    /// True when <paramref name="type"/> resolves to a CLR value type. Looks at primitives plus the
+    /// graph's named entries (enum / readonly record struct value-object) — pure <see cref="TypeRef"/>
+    /// can't know that on its own.
+    /// </summary>
+    static bool IsValueTypeReference(Ir.TypeRef type, TypeGraph graph)
+    {
+        return type switch
+        {
+            Ir.TypeRef.Primitive p => p.Kind != Ir.PrimitiveKind.String,
+            Ir.TypeRef.Nullable nu => IsValueTypeReference(nu.Inner, graph),
+            Ir.TypeRef.Named n =>
+                graph.Types.TryGetValue(n.Name, out var desc)
+                && (desc is Ir.EnumTypeDescriptor
+                    || (desc is Ir.ObjectTypeDescriptor obj && obj.Style == TypeStyle.ReadonlyRecordStruct)),
+            _ => false,
+        };
+    }
+
 
     static string RenderPropertyType(PropertyDescriptor p)
     {

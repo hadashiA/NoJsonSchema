@@ -8,10 +8,10 @@ public partial class BreakpointEventBody
     /// <summary>
     /// The reason for the event.
     /// </summary>
-    public string Reason { get; set; }
+    public string Reason { get; set; } = default!;
     
     /// <summary>
     /// The `id` attribute is used to find the target breakpoint, the other attributes are used as the new values.
     /// </summary>
-    public Breakpoint Breakpoint { get; set; }
+    public Breakpoint Breakpoint { get; set; } = default!;
 }

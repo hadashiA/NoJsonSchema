@@ -11,7 +11,7 @@ public partial class BreakpointLocationsArguments
     /// <summary>
     /// The source location of the breakpoints; either `source.path` or `source.sourceReference` must be specified.
     /// </summary>
-    public Source Source { get; set; }
+    public Source Source { get; set; } = default!;
     
     /// <summary>
     /// Start line of range to search possible breakpoint locations in. If only the line is specified, the request returns all possible locations in that line.

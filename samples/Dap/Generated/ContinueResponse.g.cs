@@ -5,5 +5,5 @@ namespace Dap;
 
 public partial class ContinueResponse : Response
 {
-    public new ContinueResponseBody Body { get; set; }
+    public new ContinueResponseBody Body { get; set; } = default!;
 }

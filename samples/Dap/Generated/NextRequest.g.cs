@@ -5,5 +5,5 @@ namespace Dap;
 
 public partial class NextRequest : Request
 {
-    public new NextArguments Arguments { get; set; }
+    public new NextArguments Arguments { get; set; } = default!;
 }

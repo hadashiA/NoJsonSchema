@@ -5,5 +5,5 @@ namespace Dap;
 
 public partial class SetBreakpointsResponse : Response
 {
-    public new SetBreakpointsResponseBody Body { get; set; }
+    public new SetBreakpointsResponseBody Body { get; set; } = default!;
 }

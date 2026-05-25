@@ -5,5 +5,5 @@ namespace Dap;
 
 public partial class VariablesResponse : Response
 {
-    public new VariablesResponseBody Body { get; set; }
+    public new VariablesResponseBody Body { get; set; } = default!;
 }

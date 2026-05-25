@@ -223,7 +223,15 @@ public static partial class RunInTerminalRequestArgumentsFormatter
             {
                 var keyBytes = global::System.Text.Encoding.UTF8.GetBytes("\"" + kv.Key.Replace("\"", "\\\"") + "\":");
                 w.WritePropertyNameRaw(keyBytes);
-                w.WriteString(kv.Value);
+                if (kv.Value is null)
+                {
+                    w.WriteNull();
+                }
+                else
+                
+                {
+                    w.WriteString(kv.Value!);
+                }
             }
             w.WriteEndObject();
         }

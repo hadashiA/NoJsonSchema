@@ -5,5 +5,5 @@ namespace Dap;
 
 public partial class ModulesRequest : Request
 {
-    public new ModulesArguments Arguments { get; set; }
+    public new ModulesArguments Arguments { get; set; } = default!;
 }

@@ -16,5 +16,5 @@ public partial class Thread
     /// <summary>
     /// The name of the thread.
     /// </summary>
-    public string Name { get; set; }
+    public string Name { get; set; } = default!;
 }

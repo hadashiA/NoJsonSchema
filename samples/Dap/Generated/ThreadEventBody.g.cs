@@ -8,7 +8,7 @@ public partial class ThreadEventBody
     /// <summary>
     /// The reason for the event.
     /// </summary>
-    public string Reason { get; set; }
+    public string Reason { get; set; } = default!;
     
     /// <summary>
     /// The identifier of the thread.

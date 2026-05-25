@@ -5,5 +5,5 @@ namespace Dap;
 
 public partial class SetInstructionBreakpointsRequest : Request
 {
-    public new SetInstructionBreakpointsArguments Arguments { get; set; }
+    public new SetInstructionBreakpointsArguments Arguments { get; set; } = default!;
 }

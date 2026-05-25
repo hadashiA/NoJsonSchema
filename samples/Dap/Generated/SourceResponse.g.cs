@@ -5,5 +5,5 @@ namespace Dap;
 
 public partial class SourceResponse : Response
 {
-    public new SourceResponseBody Body { get; set; }
+    public new SourceResponseBody Body { get; set; } = default!;
 }

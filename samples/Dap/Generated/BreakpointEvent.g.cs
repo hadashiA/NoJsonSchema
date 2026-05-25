@@ -5,5 +5,5 @@ namespace Dap;
 
 public partial class BreakpointEvent : Event
 {
-    public new BreakpointEventBody Body { get; set; }
+    public new BreakpointEventBody Body { get; set; } = default!;
 }

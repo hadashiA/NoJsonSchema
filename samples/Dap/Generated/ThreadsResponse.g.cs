@@ -5,5 +5,5 @@ namespace Dap;
 
 public partial class ThreadsResponse : Response
 {
-    public new ThreadsResponseBody Body { get; set; }
+    public new ThreadsResponseBody Body { get; set; } = default!;
 }

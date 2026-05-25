@@ -5,5 +5,5 @@ namespace Dap;
 
 public partial class StepInTargetsResponse : Response
 {
-    public new StepInTargetsResponseBody Body { get; set; }
+    public new StepInTargetsResponseBody Body { get; set; } = default!;
 }

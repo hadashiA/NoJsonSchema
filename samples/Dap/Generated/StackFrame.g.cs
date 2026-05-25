@@ -17,7 +17,7 @@ public partial class StackFrame
     /// <summary>
     /// The name of the stack frame, typically a method name.
     /// </summary>
-    public string Name { get; set; }
+    public string Name { get; set; } = default!;
     
     /// <summary>
     /// The source of the frame.

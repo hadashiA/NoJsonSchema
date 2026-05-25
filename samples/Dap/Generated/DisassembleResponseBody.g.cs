@@ -8,5 +8,5 @@ public partial class DisassembleResponseBody
     /// <summary>
     /// The list of disassembled instructions.
     /// </summary>
-    public DisassembledInstruction[] Instructions { get; set; }
+    public DisassembledInstruction[] Instructions { get; set; } = default!;
 }

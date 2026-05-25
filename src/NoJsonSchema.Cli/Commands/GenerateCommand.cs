@@ -52,6 +52,11 @@ static class GenerateCommand
             AllowMultipleArgumentsPerToken = true,
         };
 
+        var useRequiredOption = new Option<bool>(
+            aliases: ["--use-required"],
+            description: "Emit the C# 11 'required' modifier on non-nullable required properties (otherwise '= default!' is used to suppress CS8618).",
+            getDefaultValue: () => false);
+
         var command = new Command("generate", "Generate C# code from a JSON Schema.")
         {
             inputOption,
@@ -62,6 +67,7 @@ static class GenerateCommand
             allofOption,
             strictExtra,
             valueObjectOption,
+            useRequiredOption,
         };
 
         command.SetHandler(async context =>
@@ -77,6 +83,7 @@ static class GenerateCommand
                 AllOfStrategy = context.ParseResult.GetValueForOption(allofOption),
                 StrictExtraProperties = context.ParseResult.GetValueForOption(strictExtra),
                 ValueObjectTypes = new HashSet<string>(valueObjects, StringComparer.Ordinal),
+                UseRequiredModifier = context.ParseResult.GetValueForOption(useRequiredOption),
             };
 
             var schemaJson = await File.ReadAllTextAsync(input.FullName).ConfigureAwait(false);

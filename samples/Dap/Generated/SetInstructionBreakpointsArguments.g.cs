@@ -11,5 +11,5 @@ public partial class SetInstructionBreakpointsArguments
     /// <summary>
     /// The instruction references of the breakpoints
     /// </summary>
-    public InstructionBreakpoint[] Breakpoints { get; set; }
+    public InstructionBreakpoint[] Breakpoints { get; set; } = default!;
 }

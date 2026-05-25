@@ -5,5 +5,5 @@ namespace Dap;
 
 public partial class SetExpressionResponse : Response
 {
-    public new SetExpressionResponseBody Body { get; set; }
+    public new SetExpressionResponseBody Body { get; set; } = default!;
 }

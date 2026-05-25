@@ -17,7 +17,7 @@ public partial class GotoTarget
     /// <summary>
     /// The name of the goto target (shown in the UI).
     /// </summary>
-    public string Label { get; set; }
+    public string Label { get; set; } = default!;
     
     /// <summary>
     /// The line of the goto target.

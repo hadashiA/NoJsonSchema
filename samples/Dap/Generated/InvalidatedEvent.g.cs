@@ -5,5 +5,5 @@ namespace Dap;
 
 public partial class InvalidatedEvent : Event
 {
-    public new InvalidatedEventBody Body { get; set; }
+    public new InvalidatedEventBody Body { get; set; } = default!;
 }

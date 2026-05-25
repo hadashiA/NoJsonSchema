@@ -5,5 +5,5 @@ namespace Dap;
 
 public partial class AttachRequest : Request
 {
-    public new AttachRequestArguments Arguments { get; set; }
+    public new AttachRequestArguments Arguments { get; set; } = default!;
 }

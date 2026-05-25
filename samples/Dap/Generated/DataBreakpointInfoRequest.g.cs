@@ -5,5 +5,5 @@ namespace Dap;
 
 public partial class DataBreakpointInfoRequest : Request
 {
-    public new DataBreakpointInfoArguments Arguments { get; set; }
+    public new DataBreakpointInfoArguments Arguments { get; set; } = default!;
 }

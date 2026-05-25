@@ -5,5 +5,5 @@ namespace Dap;
 
 public partial class EvaluateRequest : Request
 {
-    public new EvaluateArguments Arguments { get; set; }
+    public new EvaluateArguments Arguments { get; set; } = default!;
 }

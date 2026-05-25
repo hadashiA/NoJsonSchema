@@ -5,5 +5,5 @@ namespace Dap;
 
 public partial class StepOutRequest : Request
 {
-    public new StepOutArguments Arguments { get; set; }
+    public new StepOutArguments Arguments { get; set; } = default!;
 }

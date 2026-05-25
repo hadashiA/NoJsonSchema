@@ -11,5 +11,5 @@ public partial class SetFunctionBreakpointsArguments
     /// <summary>
     /// The function names of the breakpoints.
     /// </summary>
-    public FunctionBreakpoint[] Breakpoints { get; set; }
+    public FunctionBreakpoint[] Breakpoints { get; set; } = default!;
 }

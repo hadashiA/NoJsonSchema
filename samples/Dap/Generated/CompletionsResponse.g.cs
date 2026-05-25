@@ -5,5 +5,5 @@ namespace Dap;
 
 public partial class CompletionsResponse : Response
 {
-    public new CompletionsResponseBody Body { get; set; }
+    public new CompletionsResponseBody Body { get; set; } = default!;
 }

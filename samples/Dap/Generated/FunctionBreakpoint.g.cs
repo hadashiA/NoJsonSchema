@@ -11,7 +11,7 @@ public partial class FunctionBreakpoint
     /// <summary>
     /// The name of the function.
     /// </summary>
-    public string Name { get; set; }
+    public string Name { get; set; } = default!;
     
     /// <summary>
     /// An expression for conditional breakpoints.

@@ -548,21 +548,52 @@ public static class FormatterEmitter
 
     static void EmitWriteElement(SourceWriter w, TypeRef element, EmitContext ctx, string accessor = "item")
     {
-        var inner = Unwrap(element);
+        // For nullable elements (e.g. array of string? / dictionary<string, string?>) emit a null
+        // branch so we don't pass a null straight to WriteString/WriteInt32 etc.
+        if (element is TypeRef.Nullable)
+        {
+            using (w.Block($"if ({accessor} is null)"))
+            {
+                w.WriteLine("w.WriteNull();");
+            }
+            w.WriteLine("else");
+            using (w.BraceBlock())
+            {
+                EmitWriteElementCore(w, Unwrap(element), ctx, accessor, unwrapValue: true);
+            }
+            return;
+        }
+
+        EmitWriteElementCore(w, Unwrap(element), ctx, accessor, unwrapValue: false);
+    }
+
+    static void EmitWriteElementCore(SourceWriter w, TypeRef inner, EmitContext ctx, string accessor, bool unwrapValue)
+    {
+        // When the original element was Nullable<T> for a value type, callers need .Value to unwrap;
+        // for reference types we use the non-null assertion since the null branch already returned.
+        string read;
+        if (unwrapValue)
+        {
+            read = TypeExpression.IsValueType(inner) ? accessor + ".Value" : accessor + "!";
+        }
+        else
+        {
+            read = accessor;
+        }
+
         switch (inner)
         {
             case TypeRef.Primitive prim:
-                w.WriteLine(WritePrimitiveExpr(prim, accessor) + ";");
+                w.WriteLine(WritePrimitiveExpr(prim, read) + ";");
                 break;
             case TypeRef.Named named when ctx.IsEnum(named.Name):
-                w.WriteLine($"{named.Name}Formatter.WriteValue(ref w, {accessor});");
+                w.WriteLine($"{named.Name}Formatter.WriteValue(ref w, {read});");
                 break;
             case TypeRef.Named named when ctx.IsStruct(named.Name):
-                // foreach iteration variables / KeyValuePair.Value are already copies — `in` is fine on them.
-                w.WriteLine($"{named.Name}Formatter.WriteValue(ref w, in {accessor}, options);");
+                w.WriteLine($"{named.Name}Formatter.WriteValue(ref w, in {read}, options);");
                 break;
             case TypeRef.Named named:
-                w.WriteLine($"{named.Name}Formatter.WriteValue(ref w, {accessor}, options);");
+                w.WriteLine($"{named.Name}Formatter.WriteValue(ref w, {read}, options);");
                 break;
             default:
                 w.WriteLine("w.WriteNull();");

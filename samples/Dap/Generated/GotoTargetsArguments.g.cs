@@ -11,7 +11,7 @@ public partial class GotoTargetsArguments
     /// <summary>
     /// The source location for which the goto targets are determined.
     /// </summary>
-    public Source Source { get; set; }
+    public Source Source { get; set; } = default!;
     
     /// <summary>
     /// The line location for which the goto targets are determined.

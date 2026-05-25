@@ -11,7 +11,7 @@ public partial class EvaluateArguments
     /// <summary>
     /// The expression to evaluate.
     /// </summary>
-    public string Expression { get; set; }
+    public string Expression { get; set; } = default!;
     
     /// <summary>
     /// Evaluate the expression in the scope of this stack frame. If not specified, the expression is evaluated in the global scope.

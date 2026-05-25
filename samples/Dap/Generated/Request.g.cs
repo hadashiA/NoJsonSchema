@@ -8,7 +8,7 @@ public partial class Request : ProtocolMessage
     /// <summary>
     /// The command to execute.
     /// </summary>
-    public string Command { get; set; }
+    public string Command { get; set; } = default!;
     
     /// <summary>
     /// Object containing arguments for the command.

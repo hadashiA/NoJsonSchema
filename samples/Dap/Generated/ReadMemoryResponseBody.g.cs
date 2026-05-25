@@ -9,7 +9,7 @@ public partial class ReadMemoryResponseBody
     /// The address of the first byte of data returned.
     /// Treated as a hex value if prefixed with `0x`, or as a decimal value otherwise.
     /// </summary>
-    public string Address { get; set; }
+    public string Address { get; set; } = default!;
     
     /// <summary>
     /// The number of unreadable bytes encountered after the last successfully read byte.

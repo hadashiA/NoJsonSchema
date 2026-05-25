@@ -5,5 +5,5 @@ namespace Dap;
 
 public partial class StackTraceRequest : Request
 {
-    public new StackTraceArguments Arguments { get; set; }
+    public new StackTraceArguments Arguments { get; set; } = default!;
 }

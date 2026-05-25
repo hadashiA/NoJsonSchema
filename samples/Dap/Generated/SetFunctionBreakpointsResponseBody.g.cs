@@ -8,5 +8,5 @@ public partial class SetFunctionBreakpointsResponseBody
     /// <summary>
     /// Information about the breakpoints. The array elements correspond to the elements of the `breakpoints` array.
     /// </summary>
-    public Breakpoint[] Breakpoints { get; set; }
+    public Breakpoint[] Breakpoints { get; set; } = default!;
 }

@@ -17,5 +17,5 @@ public partial class ExceptionOptions
     /// <summary>
     /// Condition when a thrown exception should result in a break.
     /// </summary>
-    public ExceptionBreakMode BreakMode { get; set; }
+    public ExceptionBreakMode BreakMode { get; set; } = default!;
 }

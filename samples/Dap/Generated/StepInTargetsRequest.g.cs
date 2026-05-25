@@ -5,5 +5,5 @@ namespace Dap;
 
 public partial class StepInTargetsRequest : Request
 {
-    public new StepInTargetsArguments Arguments { get; set; }
+    public new StepInTargetsArguments Arguments { get; set; } = default!;
 }

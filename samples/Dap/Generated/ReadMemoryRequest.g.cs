@@ -5,5 +5,5 @@ namespace Dap;
 
 public partial class ReadMemoryRequest : Request
 {
-    public new ReadMemoryArguments Arguments { get; set; }
+    public new ReadMemoryArguments Arguments { get; set; } = default!;
 }

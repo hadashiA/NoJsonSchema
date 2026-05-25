@@ -1,0 +1,55 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <IsPackable>true</IsPackable>
+    <IsRoslynComponent>true</IsRoslynComponent>
+    <EnforceExtendedAnalyzerRules>true</EnforceExtendedAnalyzerRules>
+
+    <!-- Unity 2022.3 / 2023.x ship with Roslyn 4.0–4.3. Pin to 4.3.0 so the generator DLL stays
+         loadable by both the modern .NET SDK and the Unity-bundled compiler. Do not bump without
+         confirming the target Unity LTS support. -->
+    <RoslynVersionForUnity>4.3.0</RoslynVersionForUnity>
+
+    <!-- Source generators emit C# 9-ish code via Microsoft.CodeAnalysis APIs; our own DLL source
+         can use C# 11 features but nothing that would prevent loading on Roslyn 4.3. -->
+    <LangVersion>11</LangVersion>
+
+    <Description>Roslyn incremental source generator for NoJsonSchema. Drop a JSON Schema as AdditionalFiles and get types + UTF-8 parser/emitter at build time.</Description>
+    <PackageTags>json;schema;codegen;source-generator;roslyn;unity</PackageTags>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Reference Microsoft.CodeAnalysis at the Unity-compatible version. Marked PrivateAssets so
+         consumers don't transitively pick up our copy. -->
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp"
+                      VersionOverride="$(RoslynVersionForUnity)"
+                      PrivateAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The generator depends on NoJsonSchema.Core, but Roslyn's analyzer loader looks for the
+         dependency next to the generator DLL. Reference the project and bundle its DLL alongside. -->
+    <ProjectReference Include="..\NoJsonSchema.Core\NoJsonSchema.Core.csproj"
+                      OutputItemType="Analyzer"
+                      ReferenceOutputAssembly="true"
+                      PrivateAssets="all" />
+  </ItemGroup>
+
+  <!-- Package layout: ship under analyzers/dotnet/cs/ so Roslyn picks the DLL up. -->
+  <ItemGroup>
+    <None Include="$(OutputPath)\$(AssemblyName).dll"
+          Pack="true"
+          PackagePath="analyzers/dotnet/cs"
+          Visible="false" />
+    <None Include="$(OutputPath)\NoJsonSchema.Core.dll"
+          Pack="true"
+          PackagePath="analyzers/dotnet/cs"
+          Visible="false" />
+    <None Include="build\NoJsonSchema.SourceGenerator.props"
+          Pack="true"
+          PackagePath="build/NoJsonSchema.SourceGenerator.props"
+          Visible="false" />
+  </ItemGroup>
+
+</Project>

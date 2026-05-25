@@ -5,5 +5,5 @@ namespace Dap;
 
 public partial class ExceptionInfoResponse : Response
 {
-    public new ExceptionInfoResponseBody Body { get; set; }
+    public new ExceptionInfoResponseBody Body { get; set; } = default!;
 }

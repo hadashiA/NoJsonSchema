@@ -9,7 +9,7 @@ public partial class StoppedEventBody
     /// The reason for the event.
     /// For backward compatibility this string is shown in the UI if the `description` attribute is missing (but it must not be translated).
     /// </summary>
-    public string Reason { get; set; }
+    public string Reason { get; set; } = default!;
     
     /// <summary>
     /// The full reason for the event, e.g. &#39;Paused on exception&#39;. This string is shown in the UI as is and can be translated.

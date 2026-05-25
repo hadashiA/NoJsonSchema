@@ -9,12 +9,12 @@ public partial class ProgressStartEventBody
     /// An ID that can be used in subsequent `progressUpdate` and `progressEnd` events to make them refer to the same progress reporting.
     /// IDs must be unique within a debug session.
     /// </summary>
-    public string ProgressId { get; set; }
+    public string ProgressId { get; set; } = default!;
     
     /// <summary>
     /// Short title of the progress reporting. Shown in the UI to describe the long running operation.
     /// </summary>
-    public string Title { get; set; }
+    public string Title { get; set; } = default!;
     
     /// <summary>
     /// The request ID that this progress report is related to. If specified a debug adapter is expected to emit progress events for the long running request until the request has been either completed or cancelled.

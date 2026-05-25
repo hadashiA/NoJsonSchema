@@ -249,6 +249,106 @@ ref struct Utf8JsonTokenizer
         return v;
     }
 
+    // ----- Discriminator peek (polymorphic dispatch) ---------------------------------------
+
+    /// <summary>
+    /// Scan forward (without advancing the tokenizer state) for a top-level property named
+    /// <paramref name="discriminatorName"/> on the current object, and return its raw UTF-8 string
+    /// value via <paramref name="rawValue"/>. The caller must still be positioned just after the
+    /// <c>{</c> of the object (i.e. inside it). The scan does not validate the rest of the object;
+    /// it just hunts the discriminator so a polymorphic parser can dispatch to the right subtype.
+    /// </summary>
+    public bool TryPeekDiscriminator(
+        global::System.ReadOnlySpan<byte> discriminatorName,
+        out global::System.ReadOnlySpan<byte> rawValue)
+    {
+        rawValue = default;
+        var savedPos = pos;
+        var savedValueStart = valueStart;
+        var savedValueEnd = valueEnd;
+        var savedValueHasEscape = valueHasEscape;
+        try
+        {
+            int depth = 0;
+            while (pos < length)
+            {
+                SkipWhitespace();
+                if (pos >= length) return false;
+                byte b = ByteAt(pos);
+
+                if (b == (byte)'{') { depth++; pos++; continue; }
+                if (b == (byte)'}')
+                {
+                    if (depth == 0) return false; // current object ended
+                    depth--; pos++; continue;
+                }
+                if (b == (byte)'[') { SkipObjectOrArray((byte)'[', (byte)']'); continue; }
+                if (b == (byte)',' || b == (byte)':') { pos++; continue; }
+
+                if (b != (byte)'"')
+                {
+                    // Skip scalar values quickly until we land on a property name or container.
+                    while (pos < length)
+                    {
+                        var bb = ByteAt(pos);
+                        if (bb == (byte)',' || bb == (byte)'}' || bb == (byte)']' || bb == (byte)' '
+                            || bb == (byte)'\n' || bb == (byte)'\t' || bb == (byte)'\r') break;
+                        pos++;
+                    }
+                    continue;
+                }
+
+                // We're on a string. Inside the *current* object (depth == 0) it's a property name;
+                // anywhere deeper it's a string value to skip past.
+                ReadStringValue();
+                if (depth != 0) continue;
+
+                var nameSpan = SliceFrom(valueStart, valueEnd - valueStart);
+
+                // After the name, expect ':'.
+                SkipWhitespace();
+                if (pos >= length || ByteAt(pos) != (byte)':') return false;
+                pos++;
+
+                if (nameSpan.SequenceEqual(discriminatorName) && !valueHasEscape)
+                {
+                    SkipWhitespace();
+                    if (pos >= length || ByteAt(pos) != (byte)'"') return false;
+                    ReadStringValue();
+                    if (valueHasEscape) return false; // peek does not unescape
+                    rawValue = SliceFrom(valueStart, valueEnd - valueStart);
+                    return true;
+                }
+
+                // Not the discriminator — skip the value and continue scanning.
+                SkipWhitespace();
+                if (pos >= length) return false;
+                byte valStart = ByteAt(pos);
+                if (valStart == (byte)'{') SkipObjectOrArray((byte)'{', (byte)'}');
+                else if (valStart == (byte)'[') SkipObjectOrArray((byte)'[', (byte)']');
+                else if (valStart == (byte)'"') ReadStringValue();
+                else
+                {
+                    while (pos < length)
+                    {
+                        var bb = ByteAt(pos);
+                        if (bb == (byte)',' || bb == (byte)'}' || bb == (byte)' '
+                            || bb == (byte)'\n' || bb == (byte)'\t' || bb == (byte)'\r') break;
+                        pos++;
+                    }
+                }
+            }
+            return false;
+        }
+        finally
+        {
+            pos = savedPos;
+            valueStart = savedValueStart;
+            valueEnd = savedValueEnd;
+            valueHasEscape = savedValueHasEscape;
+        }
+    }
+
     // ----- Skip an unknown value -----------------------------------------------------------
 
     public void SkipValue()

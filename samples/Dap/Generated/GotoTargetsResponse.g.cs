@@ -5,5 +5,5 @@ namespace Dap;
 
 public partial class GotoTargetsResponse : Response
 {
-    public new GotoTargetsResponseBody Body { get; set; }
+    public new GotoTargetsResponseBody Body { get; set; } = default!;
 }

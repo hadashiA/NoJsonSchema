@@ -8,10 +8,10 @@ public partial class ModuleEventBody
     /// <summary>
     /// The reason for the event.
     /// </summary>
-    public ModuleEventBodyReason Reason { get; set; }
+    public ModuleEventBodyReason Reason { get; set; } = default!;
     
     /// <summary>
     /// The new, changed, or removed module. In case of `removed` only the module id is used.
     /// </summary>
-    public Module Module { get; set; }
+    public Module Module { get; set; } = default!;
 }

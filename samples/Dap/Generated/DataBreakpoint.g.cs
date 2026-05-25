@@ -11,7 +11,7 @@ public partial class DataBreakpoint
     /// <summary>
     /// An id representing the data. This id is returned from the `dataBreakpointInfo` request.
     /// </summary>
-    public string DataId { get; set; }
+    public string DataId { get; set; } = default!;
     
     /// <summary>
     /// The access type of the data.

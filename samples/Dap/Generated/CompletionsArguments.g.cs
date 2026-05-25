@@ -16,7 +16,7 @@ public partial class CompletionsArguments
     /// <summary>
     /// One or more source lines. Typically this is the text users have typed into the debug console before they asked for completion.
     /// </summary>
-    public string Text { get; set; }
+    public string Text { get; set; } = default!;
     
     /// <summary>
     /// The position within `text` for which to determine the completion proposals. It is measured in UTF-16 code units and the client capability `columnsStartAt1` determines whether it is 0- or 1-based.

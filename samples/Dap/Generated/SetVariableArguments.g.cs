@@ -16,12 +16,12 @@ public partial class SetVariableArguments
     /// <summary>
     /// The name of the variable in the container.
     /// </summary>
-    public string Name { get; set; }
+    public string Name { get; set; } = default!;
     
     /// <summary>
     /// The value of the variable.
     /// </summary>
-    public string Value { get; set; }
+    public string Value { get; set; } = default!;
     
     /// <summary>
     /// Specifies details on how to format the response value.

@@ -5,5 +5,5 @@ namespace Dap;
 
 public partial class CapabilitiesEvent : Event
 {
-    public new CapabilitiesEventBody Body { get; set; }
+    public new CapabilitiesEventBody Body { get; set; } = default!;
 }

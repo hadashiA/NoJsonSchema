@@ -8,7 +8,7 @@ public partial class SetExpressionResponseBody
     /// <summary>
     /// The new value of the expression.
     /// </summary>
-    public string Value { get; set; }
+    public string Value { get; set; } = default!;
     
     /// <summary>
     /// The type of the value.

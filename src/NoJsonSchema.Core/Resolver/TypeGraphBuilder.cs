@@ -448,7 +448,7 @@ public sealed class TypeGraphBuilder
     static string ShortNameFromRef(string refString)
     {
         var slash = refString.LastIndexOf('/');
-        return slash < 0 ? refString : refString[(slash + 1)..];
+        return slash < 0 ? refString : refString.Substring(slash + 1);
     }
 
     EnumTypeDescriptor BuildEnumDescriptor(string name, SchemaNode schema, List<string> values)

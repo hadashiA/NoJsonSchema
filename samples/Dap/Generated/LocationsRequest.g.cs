@@ -5,5 +5,5 @@ namespace Dap;
 
 public partial class LocationsRequest : Request
 {
-    public new LocationsArguments Arguments { get; set; }
+    public new LocationsArguments Arguments { get; set; } = default!;
 }

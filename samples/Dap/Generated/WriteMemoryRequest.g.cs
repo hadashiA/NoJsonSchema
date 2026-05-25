@@ -5,5 +5,5 @@ namespace Dap;
 
 public partial class WriteMemoryRequest : Request
 {
-    public new WriteMemoryArguments Arguments { get; set; }
+    public new WriteMemoryArguments Arguments { get; set; } = default!;
 }

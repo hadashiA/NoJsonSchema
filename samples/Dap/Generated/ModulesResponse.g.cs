@@ -5,5 +5,5 @@ namespace Dap;
 
 public partial class ModulesResponse : Response
 {
-    public new ModulesResponseBody Body { get; set; }
+    public new ModulesResponseBody Body { get; set; } = default!;
 }

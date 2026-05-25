@@ -8,5 +8,5 @@ public partial class ThreadsResponseBody
     /// <summary>
     /// All threads.
     /// </summary>
-    public Thread[] Threads { get; set; }
+    public Thread[] Threads { get; set; } = default!;
 }

@@ -5,5 +5,5 @@ namespace Dap;
 
 public partial class SourceRequest : Request
 {
-    public new SourceArguments Arguments { get; set; }
+    public new SourceArguments Arguments { get; set; } = default!;
 }

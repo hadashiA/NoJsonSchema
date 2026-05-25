@@ -8,7 +8,7 @@ public partial class ProgressUpdateEventBody
     /// <summary>
     /// The ID that was introduced in the initial `progressStart` event.
     /// </summary>
-    public string ProgressId { get; set; }
+    public string ProgressId { get; set; } = default!;
     
     /// <summary>
     /// More detailed progress message. If omitted, the previous message (if any) is used.

@@ -5,5 +5,5 @@ namespace Dap;
 
 public partial class ModuleEvent : Event
 {
-    public new ModuleEventBody Body { get; set; }
+    public new ModuleEventBody Body { get; set; } = default!;
 }

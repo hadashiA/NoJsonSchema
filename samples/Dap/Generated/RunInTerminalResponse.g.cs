@@ -5,5 +5,5 @@ namespace Dap;
 
 public partial class RunInTerminalResponse : Response
 {
-    public new RunInTerminalResponseBody Body { get; set; }
+    public new RunInTerminalResponseBody Body { get; set; } = default!;
 }

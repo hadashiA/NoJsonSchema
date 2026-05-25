@@ -11,7 +11,7 @@ public partial class Scope
     /// <summary>
     /// Name of the scope such as &#39;Arguments&#39;, &#39;Locals&#39;, or &#39;Registers&#39;. This string is shown in the UI as is and can be translated.
     /// </summary>
-    public string Name { get; set; }
+    public string Name { get; set; } = default!;
     
     /// <summary>
     /// A hint for how to present this scope in the UI. If this attribute is missing, the scope is shown with a generic UI.

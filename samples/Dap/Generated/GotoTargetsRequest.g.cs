@@ -5,5 +5,5 @@ namespace Dap;
 
 public partial class GotoTargetsRequest : Request
 {
-    public new GotoTargetsArguments Arguments { get; set; }
+    public new GotoTargetsArguments Arguments { get; set; } = default!;
 }
