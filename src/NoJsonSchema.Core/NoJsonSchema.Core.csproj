@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFrameworks>net8.0;netstandard2.1</TargetFrameworks>
+    <IsPackable>true</IsPackable>
+    <Description>JSON Schema → C# types + zero-dependency UTF-8 JSON parser/emitter generator.</Description>
+    <PackageTags>json;schema;codegen;source-generator;utf8</PackageTags>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="System.Text.Json" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>nojsonschema</ToolCommandName>
+    <IsPackable>true</IsPackable>
+    <RootNamespace>NoJsonSchema.Cli</RootNamespace>
+    <AssemblyName>nojsonschema</AssemblyName>
+    <Description>CLI for the NoJsonSchema code generator.</Description>
+    <PackageTags>json;schema;codegen;dotnet-tool</PackageTags>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\NoJsonSchema.Core\NoJsonSchema.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="System.CommandLine" />
+  </ItemGroup>
+
+</Project>
