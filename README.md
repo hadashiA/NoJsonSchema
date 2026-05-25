@@ -11,15 +11,36 @@
 Point NoJsonSchema at a JSON Schema (Draft 2020-12 / Draft-07) or OpenAPI 3.x document and it emits:
 
 1. **POCO types** — `class` / `record` / `readonly record struct`, your choice per type.
-2. **A per-type Formatter** — UTF-8 parser and emitter built on `ref byte` + `Unsafe.Add`, no `System.Text.Json` at runtime.
+2. **A per-type Formatter** — UTF-8 parser and emitter built on `ref byte` + `Unsafe.Add`.
 3. **A namespace-wide Serializer** — generic `Deserialize<T>` / `Serialize<T>` with `Cache<T>` dispatch (one resolve per CLR generic instantiation, then a single static-field load).
-
-The generated code is **BCL-only**. No reflection, no STJ. **AOT- and IL2CPP-friendly** — works in Unity, .NET Native AOT, and trimmed apps.
 
 ```
 JSON Schema  ─►  NoJsonSchema  ─►  C# types + UTF-8 JSON IO  ─►  your app
                   (build-time)        (BCL-only, AOT-safe)
 ```
+
+## Zero runtime dependencies
+
+The generated `.cs` files reference **nothing except the BCL** — no `System.Text.Json`, no `Newtonsoft.Json`, no reflection, no third-party packages of any kind. Just `System`, `System.Buffers`, `System.IO`, `System.Runtime.CompilerServices`.
+
+After build, `dotnet list package` for your project looks the same as it did before — NoJsonSchema is gone:
+
+```sh
+$ dotnet add package NoJsonSchema.SourceGenerator
+$ dotnet build
+$ dotnet list package
+# (no NoJsonSchema entries — the generator is build-time only, no runtime carry-over)
+```
+
+That means:
+
+- **Native AOT / `PublishAot=true`** works out of the box. Nothing to root in `rd.xml`, no warnings.
+- **Unity / IL2CPP** can swallow it whole. No `JsonSerializerOptions` configuration, no `[JsonSerializable]` attributes to track, no `TypeInfoResolver` chains.
+- **Trimming (`PublishTrimmed=true`)** is safe. The generator doesn't emit anything that survives trim analysis as un-rooted reflection.
+- **No version skew.** The CLI/SourceGenerator package can bump independently; your app's runtime surface is unaffected because it doesn't link to NoJsonSchema at all.
+- **No transitive STJ pull.** Apps targeting netstandard2.0 that use NoJsonSchema-generated code don't transitively pull `System.Text.Json` 8.x and the chain of `System.Text.Encodings.Web`, `System.Memory`, etc. that comes with it.
+
+The Core library itself (`NoJsonSchema.dll`) does depend on `System.Text.Json` — but only for reading the schema document at *generator time*. None of that touches your shipped binary.
 
 ## Why
 

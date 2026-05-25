@@ -10,7 +10,7 @@ namespace NoJsonSchema.Roundtrip.Tests;
 
 public class ValueObjectStructTests(ITestOutputHelper output)
 {
-    static readonly CSharpParseOptions ParseOptions = new(LanguageVersion.Latest);
+    static readonly CSharpParseOptions ParseOptions = new(LanguageVersion.Latest, preprocessorSymbols: ["NET5_0_OR_GREATER", "NET6_0_OR_GREATER", "NET7_0_OR_GREATER", "NET8_0_OR_GREATER"]);
 
     static (Assembly, GenerationResult) Compile(string schema, string ns, params string[] valueObjects)
     {

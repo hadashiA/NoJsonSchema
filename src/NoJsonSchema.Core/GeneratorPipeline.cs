@@ -24,9 +24,13 @@ public sealed class GeneratorPipeline
             valueObjectTypeNames: options.ValueObjectTypes,
             includedTypeNames: options.IncludedTypes);
 
-        var files = new List<GeneratedFile>(graph.Types.Count * 2 + 2)
+        var files = new List<GeneratedFile>(graph.Types.Count * 2 + 3)
         {
             new($"{serializerName}.g.cs", SerializerEmitter.Emit(serializerName, graph, options)),
+            // IsExternalInit is needed for the `init` setters on NoJsonSerializerOptions — emit
+            // unconditionally because every namespace pulls in that options type. Guarded with
+            // `#if !NET5_0_OR_GREATER` so net5+ consumers transparently keep using the BCL type.
+            new("_IsExternalInitShim.g.cs", Emit.SerializerTemplate.IsExternalInitShim),
         };
         if (options.UseRequiredModifier)
         {

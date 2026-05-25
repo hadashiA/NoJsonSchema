@@ -16,7 +16,7 @@ namespace NoJsonSchema.Roundtrip.Tests;
 /// </summary>
 public class PrimitiveFormatTests(ITestOutputHelper output)
 {
-    static readonly CSharpParseOptions ParseOptions = new(LanguageVersion.Latest);
+    static readonly CSharpParseOptions ParseOptions = new(LanguageVersion.Latest, preprocessorSymbols: ["NET5_0_OR_GREATER", "NET6_0_OR_GREATER", "NET7_0_OR_GREATER", "NET8_0_OR_GREATER"]);
 
     static Assembly Compile(string schema, string ns)
     {
