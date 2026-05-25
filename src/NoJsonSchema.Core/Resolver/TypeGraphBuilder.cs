@@ -23,16 +23,27 @@ public sealed class TypeGraphBuilder
     /// in directly without minting a C# type.
     /// </summary>
     readonly Dictionary<string, TypeRef> primitiveAliases = new(StringComparer.Ordinal);
+    /// <summary>C# type names requested to materialise as <see cref="TypeStyle.ReadonlyRecordStruct"/>.</summary>
+    HashSet<string> valueObjectTypes = new(StringComparer.Ordinal);
 
     /// <summary>
     /// Build a graph from <paramref name="document"/>. Names reserved via <paramref name="reservedNames"/>
     /// are excluded from the candidate pool (used to keep the namespace-wide <c>{Ns}Serializer</c> name free).
+    /// <paramref name="valueObjectTypeNames"/> requests <see cref="TypeStyle.ReadonlyRecordStruct"/>
+    /// for the named $defs entries.
     /// </summary>
-    public TypeGraph Build(JsonSchemaDocument document, IEnumerable<string>? reservedNames = null)
+    public TypeGraph Build(
+        JsonSchemaDocument document,
+        IEnumerable<string>? reservedNames = null,
+        HashSet<string>? valueObjectTypeNames = null)
     {
         if (reservedNames is not null)
         {
             foreach (var n in reservedNames) names.ReserveTypeName(n);
+        }
+        if (valueObjectTypeNames is not null)
+        {
+            valueObjectTypes = valueObjectTypeNames;
         }
 
         // Pass 1: classify each $defs entry. Bare primitive defs (e.g. `{ "type": "string" }` or
@@ -61,11 +72,39 @@ public sealed class TypeGraphBuilder
         // Resolve the root reference. If the root itself is an inline object, it produces a fresh type.
         var rootRef = BuildTypeRef(document.Root, contextHint: "Root");
 
+        ValidateValueObjectConstraints();
+
         return new TypeGraph
         {
             Types = descriptors,
             Root = rootRef,
         };
+    }
+
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
+    TypeStyle StyleFor(string typeName)
+        => valueObjectTypes.Contains(typeName) ? TypeStyle.ReadonlyRecordStruct : TypeStyle.Class;
+
+    /// <summary>
+    /// After Pass 2 finishes, scan the graph for value-object types that are also referenced as a
+    /// base by another type — that's the same conflict as a value object having its own base, but
+    /// can only be detected once every descriptor is in place.
+    /// </summary>
+    void ValidateValueObjectConstraints()
+    {
+        if (valueObjectTypes.Count == 0) return;
+
+        foreach (var kv in descriptors)
+        {
+            if (kv.Value is not ObjectTypeDescriptor obj || obj.BaseTypeName is null) continue;
+            if (valueObjectTypes.Contains(obj.BaseTypeName))
+            {
+                throw new SchemaLoadException(
+                    $"Type '{obj.BaseTypeName}' is marked as a value object (readonly record struct) but is used as the base type of '{obj.Name}'. " +
+                    "Value-object types must be leaf definitions; remove the --value-object request for '" + obj.BaseTypeName + "' or refactor the schema.",
+                    obj.SourcePointer);
+            }
+        }
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -158,6 +197,7 @@ public sealed class TypeGraphBuilder
         return new ObjectTypeDescriptor
         {
             Name = name,
+            Style = StyleFor(name),
             SourcePointer = schema.Pointer,
             Description = schema.Description,
             Deprecated = schema.Deprecated,
@@ -277,9 +317,19 @@ public sealed class TypeGraphBuilder
             }
         }
 
+        // Value-object types cannot inherit — surface this as a build error before we generate code.
+        if (valueObjectTypes.Contains(name) && baseName is not null)
+        {
+            throw new SchemaLoadException(
+                $"Type '{name}' is marked as a value object (readonly record struct) but uses 'allOf' to inherit from '{baseName}'. " +
+                "Value-object types must be leaf definitions (no allOf base).",
+                schema.Pointer);
+        }
+
         descriptor = new ObjectTypeDescriptor
         {
             Name = name,
+            Style = StyleFor(name),
             SourcePointer = schema.Pointer,
             Description = schema.Description,
             Deprecated = schema.Deprecated,

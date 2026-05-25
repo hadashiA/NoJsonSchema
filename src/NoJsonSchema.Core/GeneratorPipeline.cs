@@ -18,7 +18,10 @@ public sealed class GeneratorPipeline
     {
         var doc = JsonSchemaLoader.Load(schemaJson);
         var serializerName = ResolveSerializerName(options);
-        var graph = new TypeGraphBuilder().Build(doc, reservedNames: [serializerName]);
+        var graph = new TypeGraphBuilder().Build(
+            doc,
+            reservedNames: [serializerName],
+            valueObjectTypeNames: options.ValueObjectTypes);
 
         var files = new List<GeneratedFile>(graph.Types.Count * 2 + 1)
         {
