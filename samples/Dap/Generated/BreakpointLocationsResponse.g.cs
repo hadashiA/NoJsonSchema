@@ -5,5 +5,5 @@ namespace Dap;
 
 public partial class BreakpointLocationsResponse : Response
 {
-    public new BreakpointLocationsResponseBody Body { get; set; } = default!;
+    public new BreakpointLocationsResponseBody Body { get; set; } = null!;
 }

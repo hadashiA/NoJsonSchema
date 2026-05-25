@@ -5,9 +5,9 @@ namespace NoJsonBench;
 
 public partial class Address
 {
-    public string Street { get; set; }
+    public string Street { get; set; } = null!;
     
-    public string City { get; set; }
+    public string City { get; set; } = null!;
     
-    public string Zip { get; set; }
+    public string Zip { get; set; } = null!;
 }

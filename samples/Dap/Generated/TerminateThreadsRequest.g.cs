@@ -5,5 +5,5 @@ namespace Dap;
 
 public partial class TerminateThreadsRequest : Request
 {
-    public new TerminateThreadsArguments Arguments { get; set; } = default!;
+    public new TerminateThreadsArguments Arguments { get; set; } = null!;
 }

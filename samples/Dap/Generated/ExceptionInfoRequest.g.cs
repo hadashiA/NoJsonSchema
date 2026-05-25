@@ -5,5 +5,5 @@ namespace Dap;
 
 public partial class ExceptionInfoRequest : Request
 {
-    public new ExceptionInfoArguments Arguments { get; set; } = default!;
+    public new ExceptionInfoArguments Arguments { get; set; } = null!;
 }

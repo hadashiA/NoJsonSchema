@@ -5,5 +5,5 @@ namespace Dap;
 
 public partial class MemoryEvent : Event
 {
-    public new MemoryEventBody Body { get; set; } = default!;
+    public new MemoryEventBody Body { get; set; } = null!;
 }

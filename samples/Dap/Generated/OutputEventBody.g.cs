@@ -17,7 +17,7 @@ public partial class OutputEventBody
     /// 
     /// If the `supportsANSIStyling` capabilities are not both true, then the client should display the output literally.
     /// </summary>
-    public string Output { get; set; } = default!;
+    public string Output { get; set; } = null!;
     
     /// <summary>
     /// Support for keeping an output log organized by grouping related messages.

@@ -11,7 +11,7 @@ public partial class ReadMemoryArguments
     /// <summary>
     /// Memory reference to the base location from which data should be read.
     /// </summary>
-    public string MemoryReference { get; set; } = default!;
+    public string MemoryReference { get; set; } = null!;
     
     /// <summary>
     /// Offset (in bytes) to be applied to the reference location before reading data. Can be negative.

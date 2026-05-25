@@ -5,5 +5,5 @@ namespace Dap;
 
 public partial class ProgressStartEvent : Event
 {
-    public new ProgressStartEventBody Body { get; set; } = default!;
+    public new ProgressStartEventBody Body { get; set; } = null!;
 }

@@ -5,5 +5,5 @@ namespace Dap;
 
 public partial class ReverseContinueRequest : Request
 {
-    public new ReverseContinueArguments Arguments { get; set; } = default!;
+    public new ReverseContinueArguments Arguments { get; set; } = null!;
 }

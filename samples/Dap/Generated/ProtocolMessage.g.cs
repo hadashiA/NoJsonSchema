@@ -16,5 +16,5 @@ public partial class ProtocolMessage
     /// <summary>
     /// Message type.
     /// </summary>
-    public string Type { get; set; } = default!;
+    public string Type { get; set; } = null!;
 }

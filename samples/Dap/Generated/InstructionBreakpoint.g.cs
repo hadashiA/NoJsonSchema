@@ -12,7 +12,7 @@ public partial class InstructionBreakpoint
     /// The instruction reference of the breakpoint.
     /// This should be a memory or instruction pointer reference from an `EvaluateResponse`, `Variable`, `StackFrame`, `GotoTarget`, or `Breakpoint`.
     /// </summary>
-    public string InstructionReference { get; set; } = default!;
+    public string InstructionReference { get; set; } = null!;
     
     /// <summary>
     /// The offset from the instruction reference in bytes.

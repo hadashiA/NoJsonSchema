@@ -5,5 +5,5 @@ namespace Dap;
 
 public partial class StackTraceResponse : Response
 {
-    public new StackTraceResponseBody Body { get; set; } = default!;
+    public new StackTraceResponseBody Body { get; set; } = null!;
 }

@@ -13,7 +13,7 @@ public partial class DataBreakpointInfoResponseBody
     /// <summary>
     /// UI string that describes on what data the breakpoint is set on or why a data breakpoint is not available.
     /// </summary>
-    public string Description { get; set; } = default!;
+    public string Description { get; set; } = null!;
     
     /// <summary>
     /// Attribute lists the available access types for a potential data breakpoint. A UI client could surface this information.

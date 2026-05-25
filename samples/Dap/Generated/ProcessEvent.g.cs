@@ -5,5 +5,5 @@ namespace Dap;
 
 public partial class ProcessEvent : Event
 {
-    public new ProcessEventBody Body { get; set; } = default!;
+    public new ProcessEventBody Body { get; set; } = null!;
 }

@@ -11,7 +11,7 @@ public partial class CompletionItem
     /// <summary>
     /// The label of this completion item. By default this is also the text that is inserted when selecting this completion.
     /// </summary>
-    public string Label { get; set; } = default!;
+    public string Label { get; set; } = null!;
     
     /// <summary>
     /// If text is returned and not an empty string, then it is inserted instead of the label.

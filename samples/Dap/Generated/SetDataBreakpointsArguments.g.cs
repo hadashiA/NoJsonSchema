@@ -11,5 +11,5 @@ public partial class SetDataBreakpointsArguments
     /// <summary>
     /// The contents of this array replaces all existing data breakpoints. An empty array clears all data breakpoints.
     /// </summary>
-    public DataBreakpoint[] Breakpoints { get; set; } = default!;
+    public DataBreakpoint[] Breakpoints { get; set; } = null!;
 }

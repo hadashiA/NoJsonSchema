@@ -5,5 +5,5 @@ namespace Dap;
 
 public partial class CompletionsRequest : Request
 {
-    public new CompletionsArguments Arguments { get; set; } = default!;
+    public new CompletionsArguments Arguments { get; set; } = null!;
 }

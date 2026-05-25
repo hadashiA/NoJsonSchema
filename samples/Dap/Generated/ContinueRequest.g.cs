@@ -5,5 +5,5 @@ namespace Dap;
 
 public partial class ContinueRequest : Request
 {
-    public new ContinueArguments Arguments { get; set; } = default!;
+    public new ContinueArguments Arguments { get; set; } = null!;
 }

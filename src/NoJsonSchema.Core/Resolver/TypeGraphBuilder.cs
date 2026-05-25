@@ -37,7 +37,8 @@ public sealed class TypeGraphBuilder
     public TypeGraph Build(
         JsonSchemaDocument document,
         IEnumerable<string>? reservedNames = null,
-        HashSet<string>? valueObjectTypeNames = null)
+        HashSet<string>? valueObjectTypeNames = null,
+        HashSet<string>? includedTypeNames = null)
     {
         if (reservedNames is not null)
         {
@@ -77,11 +78,85 @@ public sealed class TypeGraphBuilder
         RetrofitPolymorphicBases();
         ValidateValueObjectConstraints();
 
+        if (includedTypeNames is { Count: > 0 })
+        {
+            ApplyIncludeFilter(includedTypeNames);
+        }
+
         return new TypeGraph
         {
             Types = descriptors,
             Root = rootRef,
         };
+    }
+
+    /// <summary>
+    /// Restrict the graph to <paramref name="seeds"/> plus their transitive dependencies. Seeds are
+    /// matched after PascalCase normalisation so user-facing names like <c>"User"</c> /
+    /// <c>"user"</c> both find a <c>$defs/User</c> entry.
+    /// </summary>
+    void ApplyIncludeFilter(HashSet<string> seeds)
+    {
+        var keep = new HashSet<string>(StringComparer.Ordinal);
+        var queue = new Queue<string>();
+
+        foreach (var raw in seeds)
+        {
+            var normalised = NameFactory.ToTypeIdentifier(raw);
+            if (!descriptors.ContainsKey(normalised))
+            {
+                throw new SchemaLoadException(
+                    $"--include-type '{raw}' did not match any generated type (looked up as '{normalised}').",
+                    "#");
+            }
+            queue.Enqueue(normalised);
+        }
+
+        while (queue.Count > 0)
+        {
+            var name = queue.Dequeue();
+            if (!keep.Add(name)) continue;
+            if (!descriptors.TryGetValue(name, out var desc)) continue;
+            foreach (var dep in DependenciesOf(desc))
+            {
+                if (!keep.Contains(dep)) queue.Enqueue(dep);
+            }
+        }
+
+        foreach (var key in descriptors.Keys.ToList())
+        {
+            if (!keep.Contains(key)) descriptors.Remove(key);
+        }
+    }
+
+    static IEnumerable<string> DependenciesOf(TypeDescriptor desc)
+    {
+        if (desc is not ObjectTypeDescriptor obj) yield break;
+
+        if (obj.BaseTypeName is not null) yield return obj.BaseTypeName;
+        if (obj.Polymorphic is not null)
+        {
+            foreach (var b in obj.Polymorphic.Branches) yield return b.TypeName;
+        }
+        foreach (var p in obj.Properties)
+        {
+            foreach (var n in CollectNamedRefs(p.Type)) yield return n;
+        }
+        if (obj.AdditionalProperties is not null)
+        {
+            foreach (var n in CollectNamedRefs(obj.AdditionalProperties)) yield return n;
+        }
+    }
+
+    static IEnumerable<string> CollectNamedRefs(TypeRef t)
+    {
+        switch (t)
+        {
+            case TypeRef.Named n: yield return n.Name; break;
+            case TypeRef.Array a: foreach (var x in CollectNamedRefs(a.Element)) yield return x; break;
+            case TypeRef.Dictionary d: foreach (var x in CollectNamedRefs(d.Value)) yield return x; break;
+            case TypeRef.Nullable nu: foreach (var x in CollectNamedRefs(nu.Inner)) yield return x; break;
+        }
     }
 
     [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]

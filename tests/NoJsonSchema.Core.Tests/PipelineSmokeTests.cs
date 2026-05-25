@@ -30,6 +30,6 @@ public class PipelineSmokeTests
 
         Assert.Contains(result.Files, f => f.FileName == "SmokeSerializer.g.cs");
         Assert.Contains(result.Files, f => f.FileName == "Person.g.cs");
-        Assert.Contains(result.Files, f => f.FileName == "PersonFormatter.g.cs");
+        Assert.Contains(result.Files, f => f.FileName == "Formatters/PersonFormatter.g.cs");
     }
 }

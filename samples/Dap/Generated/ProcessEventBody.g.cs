@@ -8,7 +8,7 @@ public partial class ProcessEventBody
     /// <summary>
     /// The logical name of the process. This is usually the full path to process&#39;s executable file. Example: /home/example/myproj/program.js.
     /// </summary>
-    public string Name { get; set; } = default!;
+    public string Name { get; set; } = null!;
     
     /// <summary>
     /// The process ID of the debugged process, as assigned by the operating system. This property should be omitted for logical processes that do not map to operating system processes on the machine.

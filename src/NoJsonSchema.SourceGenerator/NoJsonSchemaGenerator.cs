@@ -25,6 +25,7 @@ public sealed class NoJsonSchemaGenerator : IIncrementalGenerator
     const string TypeStyleMetadata = "NoJsonSchemaTypeStyle";
     const string StrictExtraMetadata = "NoJsonSchemaStrictExtraProperties";
     const string UseRequiredMetadata = "NoJsonSchemaUseRequired";
+    const string IncludeTypesMetadata = "NoJsonSchemaIncludeTypes";
 
     static readonly DiagnosticDescriptor SchemaLoadError = new(
         id: "NJS001",
@@ -77,7 +78,9 @@ public sealed class NoJsonSchemaGenerator : IIncrementalGenerator
                         out var v) && v,
                     UseRequired: bool.TryParse(
                         GetMetadata(fileOptions, UseRequiredMetadata) ?? GetGlobal(globals, UseRequiredMetadata),
-                        out var rq) && rq);
+                        out var rq) && rq,
+                    IncludeTypes: ParseList(GetMetadata(fileOptions, IncludeTypesMetadata)
+                                            ?? GetGlobal(globals, IncludeTypesMetadata)));
             });
 
         context.RegisterSourceOutput(perFile, Emit);
@@ -94,6 +97,7 @@ public sealed class NoJsonSchemaGenerator : IIncrementalGenerator
                 TypeStyle = ParseStyle(input.TypeStyle),
                 ValueObjectTypes = new System.Collections.Generic.HashSet<string>(input.ValueObjects, StringComparer.Ordinal),
                 UseRequiredModifier = input.UseRequired,
+                IncludedTypes = new System.Collections.Generic.HashSet<string>(input.IncludeTypes, StringComparer.Ordinal),
             };
 
             GenerationResult result;
@@ -109,7 +113,9 @@ public sealed class NoJsonSchemaGenerator : IIncrementalGenerator
 
             foreach (var f in result.Files)
             {
-                spc.AddSource(f.FileName, SourceText.From(f.SourceText, Encoding.UTF8));
+                // Roslyn hint names mustn't contain path separators; flatten the subdir into a `.` style identifier.
+                var hint = f.FileName.Replace('/', '.').Replace('\\', '.');
+                spc.AddSource(hint, SourceText.From(f.SourceText, Encoding.UTF8));
             }
         }
         catch (Exception ex)
@@ -151,5 +157,6 @@ public sealed class NoJsonSchemaGenerator : IIncrementalGenerator
         ImmutableArray<string> ValueObjects,
         string TypeStyle,
         bool StrictExtra,
-        bool UseRequired);
+        bool UseRequired,
+        ImmutableArray<string> IncludeTypes);
 }

@@ -11,7 +11,7 @@ public partial class ExceptionFilterOptions
     /// <summary>
     /// ID of an exception filter returned by the `exceptionBreakpointFilters` capability.
     /// </summary>
-    public string FilterId { get; set; } = default!;
+    public string FilterId { get; set; } = null!;
     
     /// <summary>
     /// An expression for conditional exceptions.

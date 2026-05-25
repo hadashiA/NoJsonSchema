@@ -5,5 +5,5 @@ namespace Dap;
 
 public partial class ContinuedEvent : Event
 {
-    public new ContinuedEventBody Body { get; set; } = default!;
+    public new ContinuedEventBody Body { get; set; } = null!;
 }

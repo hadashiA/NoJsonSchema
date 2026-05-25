@@ -21,7 +21,7 @@ public partial class InitializeRequestArguments
     /// <summary>
     /// The ID of the debug adapter.
     /// </summary>
-    public string AdapterID { get; set; } = default!;
+    public string AdapterID { get; set; } = null!;
     
     /// <summary>
     /// The ISO-639 locale of the client using this adapter, e.g. en-US or de-CH.

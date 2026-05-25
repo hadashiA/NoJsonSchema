@@ -5,5 +5,5 @@ namespace Dap;
 
 public partial class InitializeRequest : Request
 {
-    public new InitializeRequestArguments Arguments { get; set; } = default!;
+    public new InitializeRequestArguments Arguments { get; set; } = null!;
 }

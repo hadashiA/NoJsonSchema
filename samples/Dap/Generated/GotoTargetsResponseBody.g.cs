@@ -8,5 +8,5 @@ public partial class GotoTargetsResponseBody
     /// <summary>
     /// The possible goto targets of the specified location.
     /// </summary>
-    public GotoTarget[] Targets { get; set; } = default!;
+    public GotoTarget[] Targets { get; set; } = null!;
 }

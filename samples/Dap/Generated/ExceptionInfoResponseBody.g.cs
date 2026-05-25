@@ -8,7 +8,7 @@ public partial class ExceptionInfoResponseBody
     /// <summary>
     /// ID of the exception that was thrown.
     /// </summary>
-    public string ExceptionId { get; set; } = default!;
+    public string ExceptionId { get; set; } = null!;
     
     /// <summary>
     /// Descriptive text for the exception.
@@ -18,7 +18,7 @@ public partial class ExceptionInfoResponseBody
     /// <summary>
     /// Mode that caused the exception notification to be raised.
     /// </summary>
-    public ExceptionBreakMode BreakMode { get; set; } = default!;
+    public ExceptionBreakMode BreakMode { get; set; }
     
     /// <summary>
     /// Detailed information about the exception.

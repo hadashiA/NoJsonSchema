@@ -22,12 +22,14 @@
     <CompilerVisibleItemMetadata Include="AdditionalFiles" MetadataName="NoJsonSchemaTypeStyle" />
     <CompilerVisibleItemMetadata Include="AdditionalFiles" MetadataName="NoJsonSchemaStrictExtraProperties" />
     <CompilerVisibleItemMetadata Include="AdditionalFiles" MetadataName="NoJsonSchemaUseRequired" />
+    <CompilerVisibleItemMetadata Include="AdditionalFiles" MetadataName="NoJsonSchemaIncludeTypes" />
 
     <CompilerVisibleProperty Include="NoJsonSchemaNamespace" />
     <CompilerVisibleProperty Include="NoJsonSchemaValueObjects" />
     <CompilerVisibleProperty Include="NoJsonSchemaTypeStyle" />
     <CompilerVisibleProperty Include="NoJsonSchemaStrictExtraProperties" />
     <CompilerVisibleProperty Include="NoJsonSchemaUseRequired" />
+    <CompilerVisibleProperty Include="NoJsonSchemaIncludeTypes" />
   </ItemGroup>
 
 </Project>

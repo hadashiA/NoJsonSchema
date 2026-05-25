@@ -11,6 +11,9 @@
     <AssemblyName>nojsonschema</AssemblyName>
     <Description>CLI for the NoJsonSchema code generator.</Description>
     <PackageTags>json;schema;codegen;dotnet-tool</PackageTags>
+
+    <!-- ConsoleAppFramework's source generator reads XML doc comments for help / short aliases. -->
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
   </PropertyGroup>
 
   <ItemGroup>
@@ -18,7 +21,10 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="System.CommandLine" />
+    <PackageReference Include="ConsoleAppFramework">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
   </ItemGroup>
 
 </Project>

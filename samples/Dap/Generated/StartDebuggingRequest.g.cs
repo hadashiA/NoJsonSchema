@@ -5,5 +5,5 @@ namespace Dap;
 
 public partial class StartDebuggingRequest : Request
 {
-    public new StartDebuggingRequestArguments Arguments { get; set; } = default!;
+    public new StartDebuggingRequestArguments Arguments { get; set; } = null!;
 }

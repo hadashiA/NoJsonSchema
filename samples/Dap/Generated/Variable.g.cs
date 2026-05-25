@@ -16,7 +16,7 @@ public partial class Variable
     /// <summary>
     /// The variable&#39;s name.
     /// </summary>
-    public string Name { get; set; } = default!;
+    public string Name { get; set; } = null!;
     
     /// <summary>
     /// The variable&#39;s value.
@@ -24,7 +24,7 @@ public partial class Variable
     /// For structured variables (which do not have a simple value), it is recommended to provide a one-line representation of the structured object. This helps to identify the structured object in the collapsed state when its children are not yet visible.
     /// An empty string can be used if no value should be shown in the UI.
     /// </summary>
-    public string Value { get; set; } = default!;
+    public string Value { get; set; } = null!;
     
     /// <summary>
     /// The type of the variable&#39;s value. Typically shown in the UI when hovering over the value.

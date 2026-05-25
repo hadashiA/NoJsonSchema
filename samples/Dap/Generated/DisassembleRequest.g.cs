@@ -5,5 +5,5 @@ namespace Dap;
 
 public partial class DisassembleRequest : Request
 {
-    public new DisassembleArguments Arguments { get; set; } = default!;
+    public new DisassembleArguments Arguments { get; set; } = null!;
 }

@@ -13,12 +13,12 @@ public partial class ColumnDescriptor
     /// <summary>
     /// Name of the attribute rendered in this column.
     /// </summary>
-    public string AttributeName { get; set; } = default!;
+    public string AttributeName { get; set; } = null!;
     
     /// <summary>
     /// Header UI label of column.
     /// </summary>
-    public string Label { get; set; } = default!;
+    public string Label { get; set; } = null!;
     
     /// <summary>
     /// Format to use for the rendered values in this column. TBD how the format strings looks like.

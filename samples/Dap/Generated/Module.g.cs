@@ -17,12 +17,12 @@ public partial class Module
     /// <summary>
     /// Unique identifier for the module.
     /// </summary>
-    public object? Id { get; set; } = default!;
+    public object? Id { get; set; } = null!;
     
     /// <summary>
     /// A name of the module.
     /// </summary>
-    public string Name { get; set; } = default!;
+    public string Name { get; set; } = null!;
     
     /// <summary>
     /// Logical full path to the module. The exact definition is implementation defined, but usually this would be a full path to the on-disk file for the module.

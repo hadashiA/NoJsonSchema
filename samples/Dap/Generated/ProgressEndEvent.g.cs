@@ -5,5 +5,5 @@ namespace Dap;
 
 public partial class ProgressEndEvent : Event
 {
-    public new ProgressEndEventBody Body { get; set; } = default!;
+    public new ProgressEndEventBody Body { get; set; } = null!;
 }

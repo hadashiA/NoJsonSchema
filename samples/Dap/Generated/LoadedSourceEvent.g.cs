@@ -5,5 +5,5 @@ namespace Dap;
 
 public partial class LoadedSourceEvent : Event
 {
-    public new LoadedSourceEventBody Body { get; set; } = default!;
+    public new LoadedSourceEventBody Body { get; set; } = null!;
 }

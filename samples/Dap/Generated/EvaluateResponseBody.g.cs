@@ -8,7 +8,7 @@ public partial class EvaluateResponseBody
     /// <summary>
     /// The result of the evaluate request.
     /// </summary>
-    public string Result { get; set; } = default!;
+    public string Result { get; set; } = null!;
     
     /// <summary>
     /// The type of the evaluate result.

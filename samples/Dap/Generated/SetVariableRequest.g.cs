@@ -5,5 +5,5 @@ namespace Dap;
 
 public partial class SetVariableRequest : Request
 {
-    public new SetVariableArguments Arguments { get; set; } = default!;
+    public new SetVariableArguments Arguments { get; set; } = null!;
 }

@@ -8,5 +8,5 @@ public partial class StepInTargetsResponseBody
     /// <summary>
     /// The possible step-in targets of the specified source location.
     /// </summary>
-    public StepInTarget[] Targets { get; set; } = default!;
+    public StepInTarget[] Targets { get; set; } = null!;
 }

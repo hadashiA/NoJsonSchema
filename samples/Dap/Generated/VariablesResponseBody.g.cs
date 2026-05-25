@@ -8,5 +8,5 @@ public partial class VariablesResponseBody
     /// <summary>
     /// All (or a range) of variables for the given variable reference.
     /// </summary>
-    public Variable[] Variables { get; set; } = default!;
+    public Variable[] Variables { get; set; } = null!;
 }

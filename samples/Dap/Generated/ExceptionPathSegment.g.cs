@@ -17,5 +17,5 @@ public partial class ExceptionPathSegment
     /// <summary>
     /// Depending on the value of `negate` the names that should match or not match.
     /// </summary>
-    public string[] Names { get; set; } = default!;
+    public string[] Names { get; set; } = null!;
 }

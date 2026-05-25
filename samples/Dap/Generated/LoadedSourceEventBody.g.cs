@@ -8,10 +8,10 @@ public partial class LoadedSourceEventBody
     /// <summary>
     /// The reason for the event.
     /// </summary>
-    public LoadedSourceEventBodyReason Reason { get; set; } = default!;
+    public LoadedSourceEventBodyReason Reason { get; set; }
     
     /// <summary>
     /// The new, changed, or removed source.
     /// </summary>
-    public Source Source { get; set; } = default!;
+    public Source Source { get; set; } = null!;
 }

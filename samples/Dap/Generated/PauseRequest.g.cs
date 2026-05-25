@@ -5,5 +5,5 @@ namespace Dap;
 
 public partial class PauseRequest : Request
 {
-    public new PauseArguments Arguments { get; set; } = default!;
+    public new PauseArguments Arguments { get; set; } = null!;
 }

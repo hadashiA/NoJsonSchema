@@ -11,12 +11,12 @@ public partial class SetExpressionArguments
     /// <summary>
     /// The l-value expression to assign to.
     /// </summary>
-    public string Expression { get; set; } = default!;
+    public string Expression { get; set; } = null!;
     
     /// <summary>
     /// The value expression to assign to the l-value expression.
     /// </summary>
-    public string Value { get; set; } = default!;
+    public string Value { get; set; } = null!;
     
     /// <summary>
     /// Evaluate the expressions in the scope of this stack frame. If not specified, the expressions are evaluated in the global scope.

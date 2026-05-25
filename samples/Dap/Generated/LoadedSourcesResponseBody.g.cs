@@ -8,5 +8,5 @@ public partial class LoadedSourcesResponseBody
     /// <summary>
     /// Set of loaded sources.
     /// </summary>
-    public Source[] Sources { get; set; } = default!;
+    public Source[] Sources { get; set; } = null!;
 }

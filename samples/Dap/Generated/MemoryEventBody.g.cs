@@ -8,7 +8,7 @@ public partial class MemoryEventBody
     /// <summary>
     /// Memory reference of a memory range that has been updated.
     /// </summary>
-    public string MemoryReference { get; set; } = default!;
+    public string MemoryReference { get; set; } = null!;
     
     /// <summary>
     /// Starting offset in bytes where memory has been updated. Can be negative.

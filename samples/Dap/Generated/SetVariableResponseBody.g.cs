@@ -8,7 +8,7 @@ public partial class SetVariableResponseBody
     /// <summary>
     /// The new value of the variable.
     /// </summary>
-    public string Value { get; set; } = default!;
+    public string Value { get; set; } = null!;
     
     /// <summary>
     /// The type of the new value. Typically shown in the UI when hovering over the value.

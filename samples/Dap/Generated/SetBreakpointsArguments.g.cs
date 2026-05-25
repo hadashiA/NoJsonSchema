@@ -11,7 +11,7 @@ public partial class SetBreakpointsArguments
     /// <summary>
     /// The source location of the breakpoints; either `source.path` or `source.sourceReference` must be specified.
     /// </summary>
-    public Source Source { get; set; } = default!;
+    public Source Source { get; set; } = null!;
     
     /// <summary>
     /// The code locations of the breakpoints.

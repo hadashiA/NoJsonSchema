@@ -21,12 +21,12 @@ public partial class RunInTerminalRequestArguments
     /// <summary>
     /// Working directory for the command. For non-empty, valid paths this typically results in execution of a change directory command. If `pathFormat` is set to `uri` in the `InitializeRequestArguments`, this must be a file URI.
     /// </summary>
-    public string Cwd { get; set; } = default!;
+    public string Cwd { get; set; } = null!;
     
     /// <summary>
     /// List of arguments. The first argument is the command to run.
     /// </summary>
-    public string[] Args { get; set; } = default!;
+    public string[] Args { get; set; } = null!;
     
     /// <summary>
     /// Environment key-value pairs that are added to or removed from the default environment.

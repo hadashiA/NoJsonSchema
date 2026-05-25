@@ -17,7 +17,7 @@ public partial class DataBreakpointInfoArguments
     /// The name of the variable&#39;s child to obtain data breakpoint information for.
     /// If `variablesReference` isn&#39;t specified, this can be an expression, or an address if `asAddress` is also true.
     /// </summary>
-    public string Name { get; set; } = default!;
+    public string Name { get; set; } = null!;
     
     /// <summary>
     /// When `name` is an expression, evaluate it in the scope of this stack frame. If not specified, the expression is evaluated in the global scope. When `variablesReference` is specified, this property has no effect.

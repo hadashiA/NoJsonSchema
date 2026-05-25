@@ -5,5 +5,5 @@ namespace Dap;
 
 public partial class ErrorResponse : Response
 {
-    public new ErrorResponseBody Body { get; set; } = default!;
+    public new ErrorResponseBody Body { get; set; } = null!;
 }

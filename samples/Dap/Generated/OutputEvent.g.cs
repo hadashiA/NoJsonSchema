@@ -5,5 +5,5 @@ namespace Dap;
 
 public partial class OutputEvent : Event
 {
-    public new OutputEventBody Body { get; set; } = default!;
+    public new OutputEventBody Body { get; set; } = null!;
 }

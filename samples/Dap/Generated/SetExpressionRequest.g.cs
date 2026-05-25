@@ -5,5 +5,5 @@ namespace Dap;
 
 public partial class SetExpressionRequest : Request
 {
-    public new SetExpressionArguments Arguments { get; set; } = default!;
+    public new SetExpressionArguments Arguments { get; set; } = null!;
 }

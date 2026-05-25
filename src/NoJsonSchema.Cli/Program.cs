@@ -1,8 +1,10 @@
-using System.CommandLine;
-using NoJsonSchema.Cli.Commands;
+using ConsoleAppFramework;
+using NoJsonSchema.Cli;
 
-var root = new RootCommand("NoJsonSchema – generate zero-dependency C# parsers from JSON Schema.");
-root.AddCommand(GenerateCommand.Build());
-root.AddCommand(LintCommand.Build());
-
-return await root.InvokeAsync(args);
+// ConsoleAppFramework's source generator wires up parsing for every public method on the registered
+// type. Commands resolve by method name (auto-kebab-cased): Generate -> "generate", Lint -> "lint".
+// `Task<int>` return values propagate as the process exit code via Environment.ExitCode.
+var app = ConsoleApp.Create();
+app.Add<NoJsonSchemaCommands>();
+await app.RunAsync(args).ConfigureAwait(false);
+return Environment.ExitCode;

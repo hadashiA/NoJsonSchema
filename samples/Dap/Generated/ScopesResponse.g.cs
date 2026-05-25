@@ -5,5 +5,5 @@ namespace Dap;
 
 public partial class ScopesResponse : Response
 {
-    public new ScopesResponseBody Body { get; set; } = default!;
+    public new ScopesResponseBody Body { get; set; } = null!;
 }

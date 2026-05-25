@@ -11,7 +11,7 @@ public partial class DisassembledInstruction
     /// <summary>
     /// The address of the instruction. Treated as a hex value if prefixed with `0x`, or as a decimal value otherwise.
     /// </summary>
-    public string Address { get; set; } = default!;
+    public string Address { get; set; } = null!;
     
     /// <summary>
     /// Raw bytes representing the instruction and its operands, in an implementation-defined format.
@@ -21,7 +21,7 @@ public partial class DisassembledInstruction
     /// <summary>
     /// Text representing the instruction and its operands, in an implementation-defined format.
     /// </summary>
-    public string Instruction { get; set; } = default!;
+    public string Instruction { get; set; } = null!;
     
     /// <summary>
     /// Name of the symbol that corresponds with the location of this instruction, if any.

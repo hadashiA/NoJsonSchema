@@ -5,5 +5,5 @@ namespace Dap;
 
 public partial class StepBackRequest : Request
 {
-    public new StepBackArguments Arguments { get; set; } = default!;
+    public new StepBackArguments Arguments { get; set; } = null!;
 }

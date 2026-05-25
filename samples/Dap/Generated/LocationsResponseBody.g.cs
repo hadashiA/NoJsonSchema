@@ -8,7 +8,7 @@ public partial class LocationsResponseBody
     /// <summary>
     /// The source containing the location; either `source.path` or `source.sourceReference` must be specified.
     /// </summary>
-    public Source Source { get; set; } = default!;
+    public Source Source { get; set; } = null!;
     
     /// <summary>
     /// The line number of the location. The client capability `linesStartAt1` determines whether it is 0- or 1-based.

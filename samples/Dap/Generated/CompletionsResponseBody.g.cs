@@ -8,5 +8,5 @@ public partial class CompletionsResponseBody
     /// <summary>
     /// The possible completions for .
     /// </summary>
-    public CompletionItem[] Targets { get; set; } = default!;
+    public CompletionItem[] Targets { get; set; } = null!;
 }

@@ -5,5 +5,5 @@ namespace Dap;
 
 public partial class ThreadEvent : Event
 {
-    public new ThreadEventBody Body { get; set; } = default!;
+    public new ThreadEventBody Body { get; set; } = null!;
 }

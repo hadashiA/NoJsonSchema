@@ -5,5 +5,5 @@ namespace Dap;
 
 public partial class StepInRequest : Request
 {
-    public new StepInArguments Arguments { get; set; } = default!;
+    public new StepInArguments Arguments { get; set; } = null!;
 }

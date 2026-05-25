@@ -21,7 +21,8 @@ public sealed class GeneratorPipeline
         var graph = new TypeGraphBuilder().Build(
             doc,
             reservedNames: [serializerName],
-            valueObjectTypeNames: options.ValueObjectTypes);
+            valueObjectTypeNames: options.ValueObjectTypes,
+            includedTypeNames: options.IncludedTypes);
 
         var files = new List<GeneratedFile>(graph.Types.Count * 2 + 2)
         {
@@ -39,11 +40,11 @@ public sealed class GeneratorPipeline
             {
                 case ObjectTypeDescriptor obj:
                     files.Add(new($"{obj.Name}.g.cs", TypeEmitter.Emit(obj, graph, options)));
-                    files.Add(new($"{obj.Name}Formatter.g.cs", FormatterEmitter.Emit(obj, graph, options)));
+                    files.Add(new($"Formatters/{obj.Name}Formatter.g.cs", FormatterEmitter.Emit(obj, graph, options)));
                     break;
                 case EnumTypeDescriptor enm:
                     files.Add(new($"{enm.Name}.g.cs", EnumTypeEmitter.Emit(enm, options)));
-                    files.Add(new($"{enm.Name}Formatter.g.cs", EnumFormatterEmitter.Emit(enm, options)));
+                    files.Add(new($"Formatters/{enm.Name}Formatter.g.cs", EnumFormatterEmitter.Emit(enm, options)));
                     break;
             }
         }

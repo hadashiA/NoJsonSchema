@@ -5,5 +5,5 @@ namespace Dap;
 
 public partial class RunInTerminalRequest : Request
 {
-    public new RunInTerminalRequestArguments Arguments { get; set; } = default!;
+    public new RunInTerminalRequestArguments Arguments { get; set; } = null!;
 }

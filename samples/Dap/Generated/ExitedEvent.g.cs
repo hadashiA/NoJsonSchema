@@ -5,5 +5,5 @@ namespace Dap;
 
 public partial class ExitedEvent : Event
 {
-    public new ExitedEventBody Body { get; set; } = default!;
+    public new ExitedEventBody Body { get; set; } = null!;
 }

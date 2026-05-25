@@ -51,4 +51,13 @@ public sealed class GenerationOptions
     /// <c>= default!;</c> suppression). Requires consumers to target a C# 11-aware compiler.
     /// </summary>
     public bool UseRequiredModifier { get; init; }
+
+    /// <summary>
+    /// When non-empty, generate only the named <c>$defs</c> / <c>components.schemas</c> entries
+    /// plus everything they transitively depend on (base types, property types, polymorphic branches,
+    /// array element / dictionary value types). Empty means "generate every type in the schema".
+    /// Names are matched after PascalCase normalisation, so <c>"user"</c> and <c>"User"</c> both
+    /// resolve to a <c>$defs/User</c> entry.
+    /// </summary>
+    public HashSet<string> IncludedTypes { get; init; } = new(StringComparer.Ordinal);
 }

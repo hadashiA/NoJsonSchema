@@ -43,6 +43,23 @@ public sealed class NoJsonSerializerOptions
 }
 
 /// <summary>
+/// Per-type formatter contract — the generic <c>{Ns}Serializer&lt;T&gt;</c> dispatch goes through a
+/// <c>Cache&lt;T&gt;</c> static-initialised once per CLR generic instantiation, then calls into one
+/// of these adapters. Keeps the hot path branch-free without sacrificing extensibility.
+/// </summary>
+public interface INoJsonFormatter<T>
+{
+    T Deserialize(global::System.ReadOnlySpan<byte> utf8Json, NoJsonSerializerOptions options);
+    void Serialize(global::System.Buffers.IBufferWriter<byte> writer, in T value, NoJsonSerializerOptions options);
+
+    T Deserialize(global::System.IO.Stream stream, NoJsonSerializerOptions options);
+    void Serialize(global::System.IO.Stream stream, in T value, NoJsonSerializerOptions options);
+
+    global::System.Threading.Tasks.ValueTask<T> DeserializeAsync(global::System.IO.Stream stream, NoJsonSerializerOptions options, global::System.Threading.CancellationToken cancellationToken);
+    global::System.Threading.Tasks.ValueTask SerializeAsync(global::System.IO.Stream stream, T value, NoJsonSerializerOptions options, global::System.Threading.CancellationToken cancellationToken);
+}
+
+/// <summary>
 /// Shared Stream &lt;-&gt; byte[] helpers. The fast path for in-memory <see cref="global::System.IO.MemoryStream"/>
 /// avoids an extra copy; otherwise the full payload is collected once before parsing.
 /// </summary>
@@ -72,12 +89,27 @@ internal static class NoJsonStreamUtility
 
 public sealed class NoJsonFormatException : global::System.Exception
 {
-    public NoJsonFormatException(string message, int position) : base(message + " (pos " + position + ")")
+    public NoJsonFormatException(string message, int position, int line = 0, int column = 0)
+        : base(FormatMessage(message, position, line, column))
     {
         Position = position;
+        Line = line;
+        Column = column;
     }
 
+    /// <summary>Byte offset within the input where the failure was detected.</summary>
     public int Position { get; }
+
+    /// <summary>1-based line number; 0 when not computed (e.g. constructed directly without source span).</summary>
+    public int Line { get; }
+
+    /// <summary>1-based column number on <see cref="Line"/>; 0 when not computed.</summary>
+    public int Column { get; }
+
+    static string FormatMessage(string message, int position, int line, int column) =>
+        line > 0
+            ? message + " (line " + line + ", column " + column + ", pos " + position + ")"
+            : message + " (pos " + position + ")";
 }
 
 /// <summary>
@@ -115,7 +147,7 @@ ref struct Utf8JsonTokenizer
     {
         SkipWhitespace();
         if (pos >= length || ByteAt(pos) != (byte)'{')
-            throw new NoJsonFormatException("Expected '{'", pos);
+            ThrowFormatException("Expected '{'");
         pos++;
     }
 
@@ -123,7 +155,7 @@ ref struct Utf8JsonTokenizer
     {
         SkipWhitespace();
         if (pos >= length || ByteAt(pos) != (byte)'[')
-            throw new NoJsonFormatException("Expected '['", pos);
+            ThrowFormatException("Expected '['");
         pos++;
     }
 
@@ -134,14 +166,14 @@ ref struct Utf8JsonTokenizer
     public bool TryReadPropertyName(out global::System.ReadOnlySpan<byte> nameUtf8)
     {
         SkipWhitespace();
-        if (pos >= length) throw new NoJsonFormatException("Unexpected end inside object", pos);
+        if (pos >= length) ThrowFormatException("Unexpected end inside object");
 
         byte b = ByteAt(pos);
         if (b == (byte)',')
         {
             pos++;
             SkipWhitespace();
-            if (pos >= length) throw new NoJsonFormatException("Unexpected end after ','", pos);
+            if (pos >= length) ThrowFormatException("Unexpected end after ','");
             b = ByteAt(pos);
         }
 
@@ -153,14 +185,14 @@ ref struct Utf8JsonTokenizer
         }
 
         if (b != (byte)'"')
-            throw new NoJsonFormatException("Expected '\"' for property name, got 0x" + b.ToString("X2"), pos);
+            ThrowFormatException("Expected '\"' for property name, got 0x" + b.ToString("X2"));
 
         ReadStringValue();
         nameUtf8 = SliceFrom(valueStart, valueEnd - valueStart);
 
         SkipWhitespace();
         if (pos >= length || ByteAt(pos) != (byte)':')
-            throw new NoJsonFormatException("Expected ':' after property name", pos);
+            ThrowFormatException("Expected ':' after property name");
         pos++;
         return true;
     }
@@ -172,14 +204,14 @@ ref struct Utf8JsonTokenizer
     public bool TryReadEndArray()
     {
         SkipWhitespace();
-        if (pos >= length) throw new NoJsonFormatException("Unexpected end inside array", pos);
+        if (pos >= length) ThrowFormatException("Unexpected end inside array");
 
         byte b = ByteAt(pos);
         if (b == (byte)',')
         {
             pos++;
             SkipWhitespace();
-            if (pos >= length) throw new NoJsonFormatException("Unexpected end after ','", pos);
+            if (pos >= length) ThrowFormatException("Unexpected end after ','");
             b = ByteAt(pos);
         }
 
@@ -208,7 +240,7 @@ ref struct Utf8JsonTokenizer
     {
         SkipWhitespace();
         if (pos >= length || ByteAt(pos) != (byte)'"')
-            throw new NoJsonFormatException("Expected string", pos);
+            ThrowFormatException("Expected string");
         ReadStringValue();
         var span = SliceFrom(valueStart, valueEnd - valueStart);
         return valueHasEscape ? DecodeString(span) : global::System.Text.Encoding.UTF8.GetString(span);
@@ -222,7 +254,7 @@ ref struct Utf8JsonTokenizer
     {
         SkipWhitespace();
         if (pos >= length || ByteAt(pos) != (byte)'"')
-            throw new NoJsonFormatException("Expected string", pos);
+            ThrowFormatException("Expected string");
         ReadStringValue();
         if (valueHasEscape) { rawBytes = default; return false; }
         rawBytes = SliceFrom(valueStart, valueEnd - valueStart);
@@ -232,23 +264,24 @@ ref struct Utf8JsonTokenizer
     public bool ReadBoolean()
     {
         SkipWhitespace();
-        if (pos >= length) throw new NoJsonFormatException("Expected boolean", pos);
+        if (pos >= length) ThrowFormatException("Expected boolean");
         byte b = ByteAt(pos);
         if (b == (byte)'t')
         {
             if (pos + 4 > length || !SliceFrom(pos, 4).SequenceEqual("true"u8))
-                throw new NoJsonFormatException("Expected 'true'", pos);
+                ThrowFormatException("Expected 'true'");
             pos += 4;
             return true;
         }
         if (b == (byte)'f')
         {
             if (pos + 5 > length || !SliceFrom(pos, 5).SequenceEqual("false"u8))
-                throw new NoJsonFormatException("Expected 'false'", pos);
+                ThrowFormatException("Expected 'false'");
             pos += 5;
             return false;
         }
-        throw new NoJsonFormatException("Expected boolean, got 0x" + b.ToString("X2"), pos);
+        ThrowFormatException("Expected boolean, got 0x" + b.ToString("X2"));
+        return false; // unreachable — the C# flow analyser doesn't honour [DoesNotReturn] for CS0161.
     }
 
     public int ReadInt32()
@@ -256,7 +289,7 @@ ref struct Utf8JsonTokenizer
         ReadNumberValue();
         if (!global::System.Buffers.Text.Utf8Parser.TryParse(
                 SliceFrom(valueStart, valueEnd - valueStart), out int v, out _))
-            throw new NoJsonFormatException("Invalid int32", pos);
+            ThrowFormatException("Invalid int32");
         return v;
     }
 
@@ -265,7 +298,7 @@ ref struct Utf8JsonTokenizer
         ReadNumberValue();
         if (!global::System.Buffers.Text.Utf8Parser.TryParse(
                 SliceFrom(valueStart, valueEnd - valueStart), out long v, out _))
-            throw new NoJsonFormatException("Invalid int64", pos);
+            ThrowFormatException("Invalid int64");
         return v;
     }
 
@@ -274,7 +307,7 @@ ref struct Utf8JsonTokenizer
         ReadNumberValue();
         if (!global::System.Buffers.Text.Utf8Parser.TryParse(
                 SliceFrom(valueStart, valueEnd - valueStart), out float v, out _))
-            throw new NoJsonFormatException("Invalid float", pos);
+            ThrowFormatException("Invalid float");
         return v;
     }
 
@@ -283,7 +316,7 @@ ref struct Utf8JsonTokenizer
         ReadNumberValue();
         if (!global::System.Buffers.Text.Utf8Parser.TryParse(
                 SliceFrom(valueStart, valueEnd - valueStart), out double v, out _))
-            throw new NoJsonFormatException("Invalid double", pos);
+            ThrowFormatException("Invalid double");
         return v;
     }
 
@@ -291,7 +324,7 @@ ref struct Utf8JsonTokenizer
     {
         var s = ReadString();
         if (!global::System.DateTimeOffset.TryParse(s, global::System.Globalization.CultureInfo.InvariantCulture, global::System.Globalization.DateTimeStyles.RoundtripKind, out var v))
-            throw new NoJsonFormatException("Invalid date-time '" + s + "'", pos);
+            ThrowFormatException("Invalid date-time '" + s + "'");
         return v;
     }
 
@@ -299,7 +332,7 @@ ref struct Utf8JsonTokenizer
     {
         var s = ReadString();
         if (!global::System.Guid.TryParse(s, out var v))
-            throw new NoJsonFormatException("Invalid uuid '" + s + "'", pos);
+            ThrowFormatException("Invalid uuid '" + s + "'");
         return v;
     }
 
@@ -408,7 +441,7 @@ ref struct Utf8JsonTokenizer
     public void SkipValue()
     {
         SkipWhitespace();
-        if (pos >= length) throw new NoJsonFormatException("Unexpected end of input", pos);
+        if (pos >= length) ThrowFormatException("Unexpected end of input");
         byte b = ByteAt(pos);
         switch (b)
         {
@@ -420,11 +453,38 @@ ref struct Utf8JsonTokenizer
             case (byte)'n': ConsumeKeyword("null"u8); return;
             default:
                 if (b == (byte)'-' || (b >= (byte)'0' && b <= (byte)'9')) { ReadNumberValue(); return; }
-                throw new NoJsonFormatException("Unexpected byte 0x" + b.ToString("X2"), pos);
+                ThrowFormatException("Unexpected byte 0x" + b.ToString("X2"));
+                return; // unreachable
         }
     }
 
     // ----- Internal helpers ----------------------------------------------------------------
+
+    /// <summary>
+    /// Throw a <see cref="NoJsonFormatException"/> annotated with the current position plus the
+    /// 1-based line / column computed from the input span. Kept as a NoInlining void helper so the
+    /// callers stay JIT-inlineable — `throw new ...` expressions inline far worse than a single
+    /// method-call to a cold throw routine.
+    /// </summary>
+    [global::System.Diagnostics.CodeAnalysis.DoesNotReturn]
+    [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    public void ThrowFormatException(string message)
+    {
+        var (line, column) = ComputeLineColumn(pos);
+        throw new NoJsonFormatException(message, pos, line, column);
+    }
+
+    (int Line, int Column) ComputeLineColumn(int position)
+    {
+        int line = 1, col = 1;
+        var max = position < length ? position : length;
+        for (int i = 0; i < max; i++)
+        {
+            if (ByteAt(i) == (byte)'\n') { line++; col = 1; }
+            else col++;
+        }
+        return (line, col);
+    }
 
     [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
     byte ByteAt(int offset) => global::System.Runtime.CompilerServices.Unsafe.Add(ref head, offset);
@@ -464,23 +524,23 @@ ref struct Utf8JsonTokenizer
             if (b == (byte)'\\')
             {
                 valueHasEscape = true;
-                if (pos + 1 >= length) throw new NoJsonFormatException("Truncated escape", pos);
+                if (pos + 1 >= length) ThrowFormatException("Truncated escape");
                 byte next = ByteAt(pos + 1);
                 pos += (next == (byte)'u') ? 6 : 2;
                 continue;
             }
             pos++;
         }
-        throw new NoJsonFormatException("Unterminated string", pos);
+        ThrowFormatException("Unterminated string");
     }
 
     void ReadNumberValue()
     {
         SkipWhitespace();
-        if (pos >= length) throw new NoJsonFormatException("Expected number", pos);
+        if (pos >= length) ThrowFormatException("Expected number");
         byte first = ByteAt(pos);
         if (first != (byte)'-' && !(first >= (byte)'0' && first <= (byte)'9'))
-            throw new NoJsonFormatException("Expected number, got 0x" + first.ToString("X2"), pos);
+            ThrowFormatException("Expected number, got 0x" + first.ToString("X2"));
 
         valueStart = pos;
         if (first == (byte)'-') pos++;
@@ -491,7 +551,7 @@ ref struct Utf8JsonTokenizer
     void ConsumeKeyword(global::System.ReadOnlySpan<byte> keyword)
     {
         if (pos + keyword.Length > length || !SliceFrom(pos, keyword.Length).SequenceEqual(keyword))
-            throw new NoJsonFormatException("Expected '" + global::System.Text.Encoding.ASCII.GetString(keyword) + "'", pos);
+            ThrowFormatException("Expected '" + global::System.Text.Encoding.ASCII.GetString(keyword) + "'");
         pos += keyword.Length;
     }
 
@@ -507,7 +567,7 @@ ref struct Utf8JsonTokenizer
             if (b == close) { depth--; pos++; continue; }
             pos++;
         }
-        if (depth != 0) throw new NoJsonFormatException("Unterminated container", pos);
+        if (depth != 0) ThrowFormatException("Unterminated container");
     }
 
     static bool IsNumberByte(byte b) =>

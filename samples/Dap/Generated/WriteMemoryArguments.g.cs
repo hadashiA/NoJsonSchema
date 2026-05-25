@@ -11,7 +11,7 @@ public partial class WriteMemoryArguments
     /// <summary>
     /// Memory reference to the base location to which data should be written.
     /// </summary>
-    public string MemoryReference { get; set; } = default!;
+    public string MemoryReference { get; set; } = null!;
     
     /// <summary>
     /// Offset (in bytes) to be applied to the reference location before writing data. Can be negative.
@@ -27,5 +27,5 @@ public partial class WriteMemoryArguments
     /// <summary>
     /// Bytes to write, encoded using base64.
     /// </summary>
-    public string Data { get; set; } = default!;
+    public string Data { get; set; } = null!;
 }

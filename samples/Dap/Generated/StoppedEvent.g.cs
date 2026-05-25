@@ -5,5 +5,5 @@ namespace Dap;
 
 public partial class StoppedEvent : Event
 {
-    public new StoppedEventBody Body { get; set; } = default!;
+    public new StoppedEventBody Body { get; set; } = null!;
 }

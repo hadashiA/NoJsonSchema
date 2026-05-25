@@ -5,5 +5,5 @@ namespace Dap;
 
 public partial class EvaluateResponse : Response
 {
-    public new EvaluateResponseBody Body { get; set; } = default!;
+    public new EvaluateResponseBody Body { get; set; } = null!;
 }

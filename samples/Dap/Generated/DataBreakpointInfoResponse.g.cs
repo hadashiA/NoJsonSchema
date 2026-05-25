@@ -5,5 +5,5 @@ namespace Dap;
 
 public partial class DataBreakpointInfoResponse : Response
 {
-    public new DataBreakpointInfoResponseBody Body { get; set; } = default!;
+    public new DataBreakpointInfoResponseBody Body { get; set; } = null!;
 }

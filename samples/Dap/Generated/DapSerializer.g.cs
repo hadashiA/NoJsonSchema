@@ -16,14 +16,74 @@ public sealed class NoJsonSerializerOptions
     public bool SkipNullProperties { get; init; } = true;
 }
 
-public sealed class NoJsonFormatException : global::System.Exception
+/// <summary>
+/// Per-type formatter contract — the generic <c>{Ns}Serializer&lt;T&gt;</c> dispatch goes through a
+/// <c>Cache&lt;T&gt;</c> static-initialised once per CLR generic instantiation, then calls into one
+/// of these adapters. Keeps the hot path branch-free without sacrificing extensibility.
+/// </summary>
+public interface INoJsonFormatter<T>
 {
-    public NoJsonFormatException(string message, int position) : base(message + " (pos " + position + ")")
+    T Deserialize(global::System.ReadOnlySpan<byte> utf8Json, NoJsonSerializerOptions options);
+    void Serialize(global::System.Buffers.IBufferWriter<byte> writer, in T value, NoJsonSerializerOptions options);
+
+    T Deserialize(global::System.IO.Stream stream, NoJsonSerializerOptions options);
+    void Serialize(global::System.IO.Stream stream, in T value, NoJsonSerializerOptions options);
+
+    global::System.Threading.Tasks.ValueTask<T> DeserializeAsync(global::System.IO.Stream stream, NoJsonSerializerOptions options, global::System.Threading.CancellationToken cancellationToken);
+    global::System.Threading.Tasks.ValueTask SerializeAsync(global::System.IO.Stream stream, T value, NoJsonSerializerOptions options, global::System.Threading.CancellationToken cancellationToken);
+}
+
+/// <summary>
+/// Shared Stream &lt;-&gt; byte[] helpers. The fast path for in-memory <see cref="global::System.IO.MemoryStream"/>
+/// avoids an extra copy; otherwise the full payload is collected once before parsing.
+/// </summary>
+internal static class NoJsonStreamUtility
+{
+    public static byte[] ReadAllBytes(global::System.IO.Stream stream)
     {
-        Position = position;
+        if (stream is global::System.IO.MemoryStream ms && ms.TryGetBuffer(out var seg))
+        {
+            var copy = new byte[seg.Count];
+            global::System.Buffer.BlockCopy(seg.Array!, seg.Offset, copy, 0, seg.Count);
+            return copy;
+        }
+        using var dest = new global::System.IO.MemoryStream();
+        stream.CopyTo(dest);
+        return dest.ToArray();
     }
 
+    public static async global::System.Threading.Tasks.ValueTask<byte[]> ReadAllBytesAsync(
+        global::System.IO.Stream stream, global::System.Threading.CancellationToken cancellationToken)
+    {
+        using var dest = new global::System.IO.MemoryStream();
+        await stream.CopyToAsync(dest, 81920, cancellationToken).ConfigureAwait(false);
+        return dest.ToArray();
+    }
+}
+
+public sealed class NoJsonFormatException : global::System.Exception
+{
+    public NoJsonFormatException(string message, int position, int line = 0, int column = 0)
+        : base(FormatMessage(message, position, line, column))
+    {
+        Position = position;
+        Line = line;
+        Column = column;
+    }
+
+    /// <summary>Byte offset within the input where the failure was detected.</summary>
     public int Position { get; }
+
+    /// <summary>1-based line number; 0 when not computed (e.g. constructed directly without source span).</summary>
+    public int Line { get; }
+
+    /// <summary>1-based column number on <see cref="Line"/>; 0 when not computed.</summary>
+    public int Column { get; }
+
+    static string FormatMessage(string message, int position, int line, int column) =>
+        line > 0
+            ? message + " (line " + line + ", column " + column + ", pos " + position + ")"
+            : message + " (pos " + position + ")";
 }
 
 /// <summary>
@@ -61,7 +121,7 @@ ref struct Utf8JsonTokenizer
     {
         SkipWhitespace();
         if (pos >= length || ByteAt(pos) != (byte)'{')
-            throw new NoJsonFormatException("Expected '{'", pos);
+            ThrowFormatException("Expected '{'");
         pos++;
     }
 
@@ -69,7 +129,7 @@ ref struct Utf8JsonTokenizer
     {
         SkipWhitespace();
         if (pos >= length || ByteAt(pos) != (byte)'[')
-            throw new NoJsonFormatException("Expected '['", pos);
+            ThrowFormatException("Expected '['");
         pos++;
     }
 
@@ -80,14 +140,14 @@ ref struct Utf8JsonTokenizer
     public bool TryReadPropertyName(out global::System.ReadOnlySpan<byte> nameUtf8)
     {
         SkipWhitespace();
-        if (pos >= length) throw new NoJsonFormatException("Unexpected end inside object", pos);
+        if (pos >= length) ThrowFormatException("Unexpected end inside object");
 
         byte b = ByteAt(pos);
         if (b == (byte)',')
         {
             pos++;
             SkipWhitespace();
-            if (pos >= length) throw new NoJsonFormatException("Unexpected end after ','", pos);
+            if (pos >= length) ThrowFormatException("Unexpected end after ','");
             b = ByteAt(pos);
         }
 
@@ -99,14 +159,14 @@ ref struct Utf8JsonTokenizer
         }
 
         if (b != (byte)'"')
-            throw new NoJsonFormatException("Expected '\"' for property name, got 0x" + b.ToString("X2"), pos);
+            ThrowFormatException("Expected '\"' for property name, got 0x" + b.ToString("X2"));
 
         ReadStringValue();
         nameUtf8 = SliceFrom(valueStart, valueEnd - valueStart);
 
         SkipWhitespace();
         if (pos >= length || ByteAt(pos) != (byte)':')
-            throw new NoJsonFormatException("Expected ':' after property name", pos);
+            ThrowFormatException("Expected ':' after property name");
         pos++;
         return true;
     }
@@ -118,14 +178,14 @@ ref struct Utf8JsonTokenizer
     public bool TryReadEndArray()
     {
         SkipWhitespace();
-        if (pos >= length) throw new NoJsonFormatException("Unexpected end inside array", pos);
+        if (pos >= length) ThrowFormatException("Unexpected end inside array");
 
         byte b = ByteAt(pos);
         if (b == (byte)',')
         {
             pos++;
             SkipWhitespace();
-            if (pos >= length) throw new NoJsonFormatException("Unexpected end after ','", pos);
+            if (pos >= length) ThrowFormatException("Unexpected end after ','");
             b = ByteAt(pos);
         }
 
@@ -154,7 +214,7 @@ ref struct Utf8JsonTokenizer
     {
         SkipWhitespace();
         if (pos >= length || ByteAt(pos) != (byte)'"')
-            throw new NoJsonFormatException("Expected string", pos);
+            ThrowFormatException("Expected string");
         ReadStringValue();
         var span = SliceFrom(valueStart, valueEnd - valueStart);
         return valueHasEscape ? DecodeString(span) : global::System.Text.Encoding.UTF8.GetString(span);
@@ -168,7 +228,7 @@ ref struct Utf8JsonTokenizer
     {
         SkipWhitespace();
         if (pos >= length || ByteAt(pos) != (byte)'"')
-            throw new NoJsonFormatException("Expected string", pos);
+            ThrowFormatException("Expected string");
         ReadStringValue();
         if (valueHasEscape) { rawBytes = default; return false; }
         rawBytes = SliceFrom(valueStart, valueEnd - valueStart);
@@ -178,23 +238,24 @@ ref struct Utf8JsonTokenizer
     public bool ReadBoolean()
     {
         SkipWhitespace();
-        if (pos >= length) throw new NoJsonFormatException("Expected boolean", pos);
+        if (pos >= length) ThrowFormatException("Expected boolean");
         byte b = ByteAt(pos);
         if (b == (byte)'t')
         {
             if (pos + 4 > length || !SliceFrom(pos, 4).SequenceEqual("true"u8))
-                throw new NoJsonFormatException("Expected 'true'", pos);
+                ThrowFormatException("Expected 'true'");
             pos += 4;
             return true;
         }
         if (b == (byte)'f')
         {
             if (pos + 5 > length || !SliceFrom(pos, 5).SequenceEqual("false"u8))
-                throw new NoJsonFormatException("Expected 'false'", pos);
+                ThrowFormatException("Expected 'false'");
             pos += 5;
             return false;
         }
-        throw new NoJsonFormatException("Expected boolean, got 0x" + b.ToString("X2"), pos);
+        ThrowFormatException("Expected boolean, got 0x" + b.ToString("X2"));
+        return false; // unreachable — the C# flow analyser doesn't honour [DoesNotReturn] for CS0161.
     }
 
     public int ReadInt32()
@@ -202,7 +263,7 @@ ref struct Utf8JsonTokenizer
         ReadNumberValue();
         if (!global::System.Buffers.Text.Utf8Parser.TryParse(
                 SliceFrom(valueStart, valueEnd - valueStart), out int v, out _))
-            throw new NoJsonFormatException("Invalid int32", pos);
+            ThrowFormatException("Invalid int32");
         return v;
     }
 
@@ -211,7 +272,7 @@ ref struct Utf8JsonTokenizer
         ReadNumberValue();
         if (!global::System.Buffers.Text.Utf8Parser.TryParse(
                 SliceFrom(valueStart, valueEnd - valueStart), out long v, out _))
-            throw new NoJsonFormatException("Invalid int64", pos);
+            ThrowFormatException("Invalid int64");
         return v;
     }
 
@@ -220,7 +281,7 @@ ref struct Utf8JsonTokenizer
         ReadNumberValue();
         if (!global::System.Buffers.Text.Utf8Parser.TryParse(
                 SliceFrom(valueStart, valueEnd - valueStart), out float v, out _))
-            throw new NoJsonFormatException("Invalid float", pos);
+            ThrowFormatException("Invalid float");
         return v;
     }
 
@@ -229,7 +290,7 @@ ref struct Utf8JsonTokenizer
         ReadNumberValue();
         if (!global::System.Buffers.Text.Utf8Parser.TryParse(
                 SliceFrom(valueStart, valueEnd - valueStart), out double v, out _))
-            throw new NoJsonFormatException("Invalid double", pos);
+            ThrowFormatException("Invalid double");
         return v;
     }
 
@@ -237,7 +298,7 @@ ref struct Utf8JsonTokenizer
     {
         var s = ReadString();
         if (!global::System.DateTimeOffset.TryParse(s, global::System.Globalization.CultureInfo.InvariantCulture, global::System.Globalization.DateTimeStyles.RoundtripKind, out var v))
-            throw new NoJsonFormatException("Invalid date-time '" + s + "'", pos);
+            ThrowFormatException("Invalid date-time '" + s + "'");
         return v;
     }
 
@@ -245,7 +306,7 @@ ref struct Utf8JsonTokenizer
     {
         var s = ReadString();
         if (!global::System.Guid.TryParse(s, out var v))
-            throw new NoJsonFormatException("Invalid uuid '" + s + "'", pos);
+            ThrowFormatException("Invalid uuid '" + s + "'");
         return v;
     }
 
@@ -354,7 +415,7 @@ ref struct Utf8JsonTokenizer
     public void SkipValue()
     {
         SkipWhitespace();
-        if (pos >= length) throw new NoJsonFormatException("Unexpected end of input", pos);
+        if (pos >= length) ThrowFormatException("Unexpected end of input");
         byte b = ByteAt(pos);
         switch (b)
         {
@@ -366,11 +427,38 @@ ref struct Utf8JsonTokenizer
             case (byte)'n': ConsumeKeyword("null"u8); return;
             default:
                 if (b == (byte)'-' || (b >= (byte)'0' && b <= (byte)'9')) { ReadNumberValue(); return; }
-                throw new NoJsonFormatException("Unexpected byte 0x" + b.ToString("X2"), pos);
+                ThrowFormatException("Unexpected byte 0x" + b.ToString("X2"));
+                return; // unreachable
         }
     }
 
     // ----- Internal helpers ----------------------------------------------------------------
+
+    /// <summary>
+    /// Throw a <see cref="NoJsonFormatException"/> annotated with the current position plus the
+    /// 1-based line / column computed from the input span. Kept as a NoInlining void helper so the
+    /// callers stay JIT-inlineable — `throw new ...` expressions inline far worse than a single
+    /// method-call to a cold throw routine.
+    /// </summary>
+    [global::System.Diagnostics.CodeAnalysis.DoesNotReturn]
+    [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    public void ThrowFormatException(string message)
+    {
+        var (line, column) = ComputeLineColumn(pos);
+        throw new NoJsonFormatException(message, pos, line, column);
+    }
+
+    (int Line, int Column) ComputeLineColumn(int position)
+    {
+        int line = 1, col = 1;
+        var max = position < length ? position : length;
+        for (int i = 0; i < max; i++)
+        {
+            if (ByteAt(i) == (byte)'\n') { line++; col = 1; }
+            else col++;
+        }
+        return (line, col);
+    }
 
     [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
     byte ByteAt(int offset) => global::System.Runtime.CompilerServices.Unsafe.Add(ref head, offset);
@@ -410,23 +498,23 @@ ref struct Utf8JsonTokenizer
             if (b == (byte)'\\')
             {
                 valueHasEscape = true;
-                if (pos + 1 >= length) throw new NoJsonFormatException("Truncated escape", pos);
+                if (pos + 1 >= length) ThrowFormatException("Truncated escape");
                 byte next = ByteAt(pos + 1);
                 pos += (next == (byte)'u') ? 6 : 2;
                 continue;
             }
             pos++;
         }
-        throw new NoJsonFormatException("Unterminated string", pos);
+        ThrowFormatException("Unterminated string");
     }
 
     void ReadNumberValue()
     {
         SkipWhitespace();
-        if (pos >= length) throw new NoJsonFormatException("Expected number", pos);
+        if (pos >= length) ThrowFormatException("Expected number");
         byte first = ByteAt(pos);
         if (first != (byte)'-' && !(first >= (byte)'0' && first <= (byte)'9'))
-            throw new NoJsonFormatException("Expected number, got 0x" + first.ToString("X2"), pos);
+            ThrowFormatException("Expected number, got 0x" + first.ToString("X2"));
 
         valueStart = pos;
         if (first == (byte)'-') pos++;
@@ -437,7 +525,7 @@ ref struct Utf8JsonTokenizer
     void ConsumeKeyword(global::System.ReadOnlySpan<byte> keyword)
     {
         if (pos + keyword.Length > length || !SliceFrom(pos, keyword.Length).SequenceEqual(keyword))
-            throw new NoJsonFormatException("Expected '" + global::System.Text.Encoding.ASCII.GetString(keyword) + "'", pos);
+            ThrowFormatException("Expected '" + global::System.Text.Encoding.ASCII.GetString(keyword) + "'");
         pos += keyword.Length;
     }
 
@@ -453,7 +541,7 @@ ref struct Utf8JsonTokenizer
             if (b == close) { depth--; pos++; continue; }
             pos++;
         }
-        if (depth != 0) throw new NoJsonFormatException("Unterminated container", pos);
+        if (depth != 0) ThrowFormatException("Unterminated container");
     }
 
     static bool IsNumberByte(byte b) =>
@@ -765,518 +853,320 @@ ref struct Utf8JsonBufferWriter
 
 public static class DapSerializer
 {
+    static readonly global::System.Collections.Generic.Dictionary<global::System.Type, object> Formatters = new(247)
+    {
+        [typeof(ProtocolMessage)] = ProtocolMessageFormatterAdapter.Instance,
+        [typeof(Request)] = RequestFormatterAdapter.Instance,
+        [typeof(Event)] = EventFormatterAdapter.Instance,
+        [typeof(Response)] = ResponseFormatterAdapter.Instance,
+        [typeof(ErrorResponseBody)] = ErrorResponseBodyFormatterAdapter.Instance,
+        [typeof(ErrorResponse)] = ErrorResponseFormatterAdapter.Instance,
+        [typeof(CancelRequest)] = CancelRequestFormatterAdapter.Instance,
+        [typeof(CancelArguments)] = CancelArgumentsFormatterAdapter.Instance,
+        [typeof(CancelResponse)] = CancelResponseFormatterAdapter.Instance,
+        [typeof(InitializedEvent)] = InitializedEventFormatterAdapter.Instance,
+        [typeof(StoppedEventBody)] = StoppedEventBodyFormatterAdapter.Instance,
+        [typeof(StoppedEvent)] = StoppedEventFormatterAdapter.Instance,
+        [typeof(ContinuedEventBody)] = ContinuedEventBodyFormatterAdapter.Instance,
+        [typeof(ContinuedEvent)] = ContinuedEventFormatterAdapter.Instance,
+        [typeof(ExitedEventBody)] = ExitedEventBodyFormatterAdapter.Instance,
+        [typeof(ExitedEvent)] = ExitedEventFormatterAdapter.Instance,
+        [typeof(TerminatedEventBody)] = TerminatedEventBodyFormatterAdapter.Instance,
+        [typeof(TerminatedEvent)] = TerminatedEventFormatterAdapter.Instance,
+        [typeof(ThreadEventBody)] = ThreadEventBodyFormatterAdapter.Instance,
+        [typeof(ThreadEvent)] = ThreadEventFormatterAdapter.Instance,
+        [typeof(OutputEventBody)] = OutputEventBodyFormatterAdapter.Instance,
+        [typeof(OutputEventBodyGroup)] = OutputEventBodyGroupFormatterAdapter.Instance,
+        [typeof(OutputEvent)] = OutputEventFormatterAdapter.Instance,
+        [typeof(BreakpointEventBody)] = BreakpointEventBodyFormatterAdapter.Instance,
+        [typeof(BreakpointEvent)] = BreakpointEventFormatterAdapter.Instance,
+        [typeof(ModuleEventBody)] = ModuleEventBodyFormatterAdapter.Instance,
+        [typeof(ModuleEventBodyReason)] = ModuleEventBodyReasonFormatterAdapter.Instance,
+        [typeof(ModuleEvent)] = ModuleEventFormatterAdapter.Instance,
+        [typeof(LoadedSourceEventBody)] = LoadedSourceEventBodyFormatterAdapter.Instance,
+        [typeof(LoadedSourceEventBodyReason)] = LoadedSourceEventBodyReasonFormatterAdapter.Instance,
+        [typeof(LoadedSourceEvent)] = LoadedSourceEventFormatterAdapter.Instance,
+        [typeof(ProcessEventBody)] = ProcessEventBodyFormatterAdapter.Instance,
+        [typeof(ProcessEventBodyStartMethod)] = ProcessEventBodyStartMethodFormatterAdapter.Instance,
+        [typeof(ProcessEvent)] = ProcessEventFormatterAdapter.Instance,
+        [typeof(CapabilitiesEventBody)] = CapabilitiesEventBodyFormatterAdapter.Instance,
+        [typeof(CapabilitiesEvent)] = CapabilitiesEventFormatterAdapter.Instance,
+        [typeof(ProgressStartEventBody)] = ProgressStartEventBodyFormatterAdapter.Instance,
+        [typeof(ProgressStartEvent)] = ProgressStartEventFormatterAdapter.Instance,
+        [typeof(ProgressUpdateEventBody)] = ProgressUpdateEventBodyFormatterAdapter.Instance,
+        [typeof(ProgressUpdateEvent)] = ProgressUpdateEventFormatterAdapter.Instance,
+        [typeof(ProgressEndEventBody)] = ProgressEndEventBodyFormatterAdapter.Instance,
+        [typeof(ProgressEndEvent)] = ProgressEndEventFormatterAdapter.Instance,
+        [typeof(InvalidatedEventBody)] = InvalidatedEventBodyFormatterAdapter.Instance,
+        [typeof(InvalidatedEvent)] = InvalidatedEventFormatterAdapter.Instance,
+        [typeof(MemoryEventBody)] = MemoryEventBodyFormatterAdapter.Instance,
+        [typeof(MemoryEvent)] = MemoryEventFormatterAdapter.Instance,
+        [typeof(RunInTerminalRequest)] = RunInTerminalRequestFormatterAdapter.Instance,
+        [typeof(RunInTerminalRequestArgumentsKind)] = RunInTerminalRequestArgumentsKindFormatterAdapter.Instance,
+        [typeof(RunInTerminalRequestArguments)] = RunInTerminalRequestArgumentsFormatterAdapter.Instance,
+        [typeof(RunInTerminalResponseBody)] = RunInTerminalResponseBodyFormatterAdapter.Instance,
+        [typeof(RunInTerminalResponse)] = RunInTerminalResponseFormatterAdapter.Instance,
+        [typeof(StartDebuggingRequest)] = StartDebuggingRequestFormatterAdapter.Instance,
+        [typeof(StartDebuggingRequestArgumentsOutputPresentation)] = StartDebuggingRequestArgumentsOutputPresentationFormatterAdapter.Instance,
+        [typeof(StartDebuggingRequestArgumentsRequest)] = StartDebuggingRequestArgumentsRequestFormatterAdapter.Instance,
+        [typeof(StartDebuggingRequestArguments)] = StartDebuggingRequestArgumentsFormatterAdapter.Instance,
+        [typeof(StartDebuggingResponse)] = StartDebuggingResponseFormatterAdapter.Instance,
+        [typeof(InitializeRequest)] = InitializeRequestFormatterAdapter.Instance,
+        [typeof(InitializeRequestArguments)] = InitializeRequestArgumentsFormatterAdapter.Instance,
+        [typeof(InitializeResponse)] = InitializeResponseFormatterAdapter.Instance,
+        [typeof(ConfigurationDoneRequest)] = ConfigurationDoneRequestFormatterAdapter.Instance,
+        [typeof(ConfigurationDoneArguments)] = ConfigurationDoneArgumentsFormatterAdapter.Instance,
+        [typeof(ConfigurationDoneResponse)] = ConfigurationDoneResponseFormatterAdapter.Instance,
+        [typeof(LaunchRequest)] = LaunchRequestFormatterAdapter.Instance,
+        [typeof(LaunchRequestArguments)] = LaunchRequestArgumentsFormatterAdapter.Instance,
+        [typeof(LaunchResponse)] = LaunchResponseFormatterAdapter.Instance,
+        [typeof(AttachRequest)] = AttachRequestFormatterAdapter.Instance,
+        [typeof(AttachRequestArguments)] = AttachRequestArgumentsFormatterAdapter.Instance,
+        [typeof(AttachResponse)] = AttachResponseFormatterAdapter.Instance,
+        [typeof(RestartRequest)] = RestartRequestFormatterAdapter.Instance,
+        [typeof(RestartArguments)] = RestartArgumentsFormatterAdapter.Instance,
+        [typeof(RestartResponse)] = RestartResponseFormatterAdapter.Instance,
+        [typeof(DisconnectRequest)] = DisconnectRequestFormatterAdapter.Instance,
+        [typeof(DisconnectArguments)] = DisconnectArgumentsFormatterAdapter.Instance,
+        [typeof(DisconnectResponse)] = DisconnectResponseFormatterAdapter.Instance,
+        [typeof(TerminateRequest)] = TerminateRequestFormatterAdapter.Instance,
+        [typeof(TerminateArguments)] = TerminateArgumentsFormatterAdapter.Instance,
+        [typeof(TerminateResponse)] = TerminateResponseFormatterAdapter.Instance,
+        [typeof(BreakpointLocationsRequest)] = BreakpointLocationsRequestFormatterAdapter.Instance,
+        [typeof(BreakpointLocationsArguments)] = BreakpointLocationsArgumentsFormatterAdapter.Instance,
+        [typeof(BreakpointLocationsResponseBody)] = BreakpointLocationsResponseBodyFormatterAdapter.Instance,
+        [typeof(BreakpointLocationsResponse)] = BreakpointLocationsResponseFormatterAdapter.Instance,
+        [typeof(SetBreakpointsRequest)] = SetBreakpointsRequestFormatterAdapter.Instance,
+        [typeof(SetBreakpointsArguments)] = SetBreakpointsArgumentsFormatterAdapter.Instance,
+        [typeof(SetBreakpointsResponseBody)] = SetBreakpointsResponseBodyFormatterAdapter.Instance,
+        [typeof(SetBreakpointsResponse)] = SetBreakpointsResponseFormatterAdapter.Instance,
+        [typeof(SetFunctionBreakpointsRequest)] = SetFunctionBreakpointsRequestFormatterAdapter.Instance,
+        [typeof(SetFunctionBreakpointsArguments)] = SetFunctionBreakpointsArgumentsFormatterAdapter.Instance,
+        [typeof(SetFunctionBreakpointsResponseBody)] = SetFunctionBreakpointsResponseBodyFormatterAdapter.Instance,
+        [typeof(SetFunctionBreakpointsResponse)] = SetFunctionBreakpointsResponseFormatterAdapter.Instance,
+        [typeof(SetExceptionBreakpointsRequest)] = SetExceptionBreakpointsRequestFormatterAdapter.Instance,
+        [typeof(SetExceptionBreakpointsArguments)] = SetExceptionBreakpointsArgumentsFormatterAdapter.Instance,
+        [typeof(SetExceptionBreakpointsResponseBody)] = SetExceptionBreakpointsResponseBodyFormatterAdapter.Instance,
+        [typeof(SetExceptionBreakpointsResponse)] = SetExceptionBreakpointsResponseFormatterAdapter.Instance,
+        [typeof(DataBreakpointInfoRequest)] = DataBreakpointInfoRequestFormatterAdapter.Instance,
+        [typeof(DataBreakpointInfoArguments)] = DataBreakpointInfoArgumentsFormatterAdapter.Instance,
+        [typeof(DataBreakpointInfoResponseBody)] = DataBreakpointInfoResponseBodyFormatterAdapter.Instance,
+        [typeof(DataBreakpointInfoResponse)] = DataBreakpointInfoResponseFormatterAdapter.Instance,
+        [typeof(SetDataBreakpointsRequest)] = SetDataBreakpointsRequestFormatterAdapter.Instance,
+        [typeof(SetDataBreakpointsArguments)] = SetDataBreakpointsArgumentsFormatterAdapter.Instance,
+        [typeof(SetDataBreakpointsResponseBody)] = SetDataBreakpointsResponseBodyFormatterAdapter.Instance,
+        [typeof(SetDataBreakpointsResponse)] = SetDataBreakpointsResponseFormatterAdapter.Instance,
+        [typeof(SetInstructionBreakpointsRequest)] = SetInstructionBreakpointsRequestFormatterAdapter.Instance,
+        [typeof(SetInstructionBreakpointsArguments)] = SetInstructionBreakpointsArgumentsFormatterAdapter.Instance,
+        [typeof(SetInstructionBreakpointsResponseBody)] = SetInstructionBreakpointsResponseBodyFormatterAdapter.Instance,
+        [typeof(SetInstructionBreakpointsResponse)] = SetInstructionBreakpointsResponseFormatterAdapter.Instance,
+        [typeof(ContinueRequest)] = ContinueRequestFormatterAdapter.Instance,
+        [typeof(ContinueArguments)] = ContinueArgumentsFormatterAdapter.Instance,
+        [typeof(ContinueResponseBody)] = ContinueResponseBodyFormatterAdapter.Instance,
+        [typeof(ContinueResponse)] = ContinueResponseFormatterAdapter.Instance,
+        [typeof(NextRequest)] = NextRequestFormatterAdapter.Instance,
+        [typeof(NextArguments)] = NextArgumentsFormatterAdapter.Instance,
+        [typeof(NextResponse)] = NextResponseFormatterAdapter.Instance,
+        [typeof(StepInRequest)] = StepInRequestFormatterAdapter.Instance,
+        [typeof(StepInArguments)] = StepInArgumentsFormatterAdapter.Instance,
+        [typeof(StepInResponse)] = StepInResponseFormatterAdapter.Instance,
+        [typeof(StepOutRequest)] = StepOutRequestFormatterAdapter.Instance,
+        [typeof(StepOutArguments)] = StepOutArgumentsFormatterAdapter.Instance,
+        [typeof(StepOutResponse)] = StepOutResponseFormatterAdapter.Instance,
+        [typeof(StepBackRequest)] = StepBackRequestFormatterAdapter.Instance,
+        [typeof(StepBackArguments)] = StepBackArgumentsFormatterAdapter.Instance,
+        [typeof(StepBackResponse)] = StepBackResponseFormatterAdapter.Instance,
+        [typeof(ReverseContinueRequest)] = ReverseContinueRequestFormatterAdapter.Instance,
+        [typeof(ReverseContinueArguments)] = ReverseContinueArgumentsFormatterAdapter.Instance,
+        [typeof(ReverseContinueResponse)] = ReverseContinueResponseFormatterAdapter.Instance,
+        [typeof(RestartFrameRequest)] = RestartFrameRequestFormatterAdapter.Instance,
+        [typeof(RestartFrameArguments)] = RestartFrameArgumentsFormatterAdapter.Instance,
+        [typeof(RestartFrameResponse)] = RestartFrameResponseFormatterAdapter.Instance,
+        [typeof(GotoRequest)] = GotoRequestFormatterAdapter.Instance,
+        [typeof(GotoArguments)] = GotoArgumentsFormatterAdapter.Instance,
+        [typeof(GotoResponse)] = GotoResponseFormatterAdapter.Instance,
+        [typeof(PauseRequest)] = PauseRequestFormatterAdapter.Instance,
+        [typeof(PauseArguments)] = PauseArgumentsFormatterAdapter.Instance,
+        [typeof(PauseResponse)] = PauseResponseFormatterAdapter.Instance,
+        [typeof(StackTraceRequest)] = StackTraceRequestFormatterAdapter.Instance,
+        [typeof(StackTraceArguments)] = StackTraceArgumentsFormatterAdapter.Instance,
+        [typeof(StackTraceResponseBody)] = StackTraceResponseBodyFormatterAdapter.Instance,
+        [typeof(StackTraceResponse)] = StackTraceResponseFormatterAdapter.Instance,
+        [typeof(ScopesRequest)] = ScopesRequestFormatterAdapter.Instance,
+        [typeof(ScopesArguments)] = ScopesArgumentsFormatterAdapter.Instance,
+        [typeof(ScopesResponseBody)] = ScopesResponseBodyFormatterAdapter.Instance,
+        [typeof(ScopesResponse)] = ScopesResponseFormatterAdapter.Instance,
+        [typeof(VariablesRequest)] = VariablesRequestFormatterAdapter.Instance,
+        [typeof(VariablesArgumentsFilter)] = VariablesArgumentsFilterFormatterAdapter.Instance,
+        [typeof(VariablesArguments)] = VariablesArgumentsFormatterAdapter.Instance,
+        [typeof(VariablesResponseBody)] = VariablesResponseBodyFormatterAdapter.Instance,
+        [typeof(VariablesResponse)] = VariablesResponseFormatterAdapter.Instance,
+        [typeof(SetVariableRequest)] = SetVariableRequestFormatterAdapter.Instance,
+        [typeof(SetVariableArguments)] = SetVariableArgumentsFormatterAdapter.Instance,
+        [typeof(SetVariableResponseBody)] = SetVariableResponseBodyFormatterAdapter.Instance,
+        [typeof(SetVariableResponse)] = SetVariableResponseFormatterAdapter.Instance,
+        [typeof(SourceRequest)] = SourceRequestFormatterAdapter.Instance,
+        [typeof(SourceArguments)] = SourceArgumentsFormatterAdapter.Instance,
+        [typeof(SourceResponseBody)] = SourceResponseBodyFormatterAdapter.Instance,
+        [typeof(SourceResponse)] = SourceResponseFormatterAdapter.Instance,
+        [typeof(ThreadsRequest)] = ThreadsRequestFormatterAdapter.Instance,
+        [typeof(ThreadsResponseBody)] = ThreadsResponseBodyFormatterAdapter.Instance,
+        [typeof(ThreadsResponse)] = ThreadsResponseFormatterAdapter.Instance,
+        [typeof(TerminateThreadsRequest)] = TerminateThreadsRequestFormatterAdapter.Instance,
+        [typeof(TerminateThreadsArguments)] = TerminateThreadsArgumentsFormatterAdapter.Instance,
+        [typeof(TerminateThreadsResponse)] = TerminateThreadsResponseFormatterAdapter.Instance,
+        [typeof(ModulesRequest)] = ModulesRequestFormatterAdapter.Instance,
+        [typeof(ModulesArguments)] = ModulesArgumentsFormatterAdapter.Instance,
+        [typeof(ModulesResponseBody)] = ModulesResponseBodyFormatterAdapter.Instance,
+        [typeof(ModulesResponse)] = ModulesResponseFormatterAdapter.Instance,
+        [typeof(LoadedSourcesRequest)] = LoadedSourcesRequestFormatterAdapter.Instance,
+        [typeof(LoadedSourcesArguments)] = LoadedSourcesArgumentsFormatterAdapter.Instance,
+        [typeof(LoadedSourcesResponseBody)] = LoadedSourcesResponseBodyFormatterAdapter.Instance,
+        [typeof(LoadedSourcesResponse)] = LoadedSourcesResponseFormatterAdapter.Instance,
+        [typeof(EvaluateRequest)] = EvaluateRequestFormatterAdapter.Instance,
+        [typeof(EvaluateArguments)] = EvaluateArgumentsFormatterAdapter.Instance,
+        [typeof(EvaluateResponseBody)] = EvaluateResponseBodyFormatterAdapter.Instance,
+        [typeof(EvaluateResponse)] = EvaluateResponseFormatterAdapter.Instance,
+        [typeof(SetExpressionRequest)] = SetExpressionRequestFormatterAdapter.Instance,
+        [typeof(SetExpressionArguments)] = SetExpressionArgumentsFormatterAdapter.Instance,
+        [typeof(SetExpressionResponseBody)] = SetExpressionResponseBodyFormatterAdapter.Instance,
+        [typeof(SetExpressionResponse)] = SetExpressionResponseFormatterAdapter.Instance,
+        [typeof(StepInTargetsRequest)] = StepInTargetsRequestFormatterAdapter.Instance,
+        [typeof(StepInTargetsArguments)] = StepInTargetsArgumentsFormatterAdapter.Instance,
+        [typeof(StepInTargetsResponseBody)] = StepInTargetsResponseBodyFormatterAdapter.Instance,
+        [typeof(StepInTargetsResponse)] = StepInTargetsResponseFormatterAdapter.Instance,
+        [typeof(GotoTargetsRequest)] = GotoTargetsRequestFormatterAdapter.Instance,
+        [typeof(GotoTargetsArguments)] = GotoTargetsArgumentsFormatterAdapter.Instance,
+        [typeof(GotoTargetsResponseBody)] = GotoTargetsResponseBodyFormatterAdapter.Instance,
+        [typeof(GotoTargetsResponse)] = GotoTargetsResponseFormatterAdapter.Instance,
+        [typeof(CompletionsRequest)] = CompletionsRequestFormatterAdapter.Instance,
+        [typeof(CompletionsArguments)] = CompletionsArgumentsFormatterAdapter.Instance,
+        [typeof(CompletionsResponseBody)] = CompletionsResponseBodyFormatterAdapter.Instance,
+        [typeof(CompletionsResponse)] = CompletionsResponseFormatterAdapter.Instance,
+        [typeof(ExceptionInfoRequest)] = ExceptionInfoRequestFormatterAdapter.Instance,
+        [typeof(ExceptionInfoArguments)] = ExceptionInfoArgumentsFormatterAdapter.Instance,
+        [typeof(ExceptionInfoResponseBody)] = ExceptionInfoResponseBodyFormatterAdapter.Instance,
+        [typeof(ExceptionInfoResponse)] = ExceptionInfoResponseFormatterAdapter.Instance,
+        [typeof(ReadMemoryRequest)] = ReadMemoryRequestFormatterAdapter.Instance,
+        [typeof(ReadMemoryArguments)] = ReadMemoryArgumentsFormatterAdapter.Instance,
+        [typeof(ReadMemoryResponseBody)] = ReadMemoryResponseBodyFormatterAdapter.Instance,
+        [typeof(ReadMemoryResponse)] = ReadMemoryResponseFormatterAdapter.Instance,
+        [typeof(WriteMemoryRequest)] = WriteMemoryRequestFormatterAdapter.Instance,
+        [typeof(WriteMemoryArguments)] = WriteMemoryArgumentsFormatterAdapter.Instance,
+        [typeof(WriteMemoryResponseBody)] = WriteMemoryResponseBodyFormatterAdapter.Instance,
+        [typeof(WriteMemoryResponse)] = WriteMemoryResponseFormatterAdapter.Instance,
+        [typeof(DisassembleRequest)] = DisassembleRequestFormatterAdapter.Instance,
+        [typeof(DisassembleArguments)] = DisassembleArgumentsFormatterAdapter.Instance,
+        [typeof(DisassembleResponseBody)] = DisassembleResponseBodyFormatterAdapter.Instance,
+        [typeof(DisassembleResponse)] = DisassembleResponseFormatterAdapter.Instance,
+        [typeof(LocationsRequest)] = LocationsRequestFormatterAdapter.Instance,
+        [typeof(LocationsArguments)] = LocationsArgumentsFormatterAdapter.Instance,
+        [typeof(LocationsResponseBody)] = LocationsResponseBodyFormatterAdapter.Instance,
+        [typeof(LocationsResponse)] = LocationsResponseFormatterAdapter.Instance,
+        [typeof(Capabilities)] = CapabilitiesFormatterAdapter.Instance,
+        [typeof(ExceptionBreakpointsFilter)] = ExceptionBreakpointsFilterFormatterAdapter.Instance,
+        [typeof(Message)] = MessageFormatterAdapter.Instance,
+        [typeof(Module)] = ModuleFormatterAdapter.Instance,
+        [typeof(ColumnDescriptorType)] = ColumnDescriptorTypeFormatterAdapter.Instance,
+        [typeof(ColumnDescriptor)] = ColumnDescriptorFormatterAdapter.Instance,
+        [typeof(Thread)] = ThreadFormatterAdapter.Instance,
+        [typeof(SourcePresentationHint)] = SourcePresentationHintFormatterAdapter.Instance,
+        [typeof(Source)] = SourceFormatterAdapter.Instance,
+        [typeof(StackFramePresentationHint)] = StackFramePresentationHintFormatterAdapter.Instance,
+        [typeof(StackFrame)] = StackFrameFormatterAdapter.Instance,
+        [typeof(Scope)] = ScopeFormatterAdapter.Instance,
+        [typeof(Variable)] = VariableFormatterAdapter.Instance,
+        [typeof(VariablePresentationHint)] = VariablePresentationHintFormatterAdapter.Instance,
+        [typeof(BreakpointLocation)] = BreakpointLocationFormatterAdapter.Instance,
+        [typeof(SourceBreakpoint)] = SourceBreakpointFormatterAdapter.Instance,
+        [typeof(FunctionBreakpoint)] = FunctionBreakpointFormatterAdapter.Instance,
+        [typeof(DataBreakpointAccessType)] = DataBreakpointAccessTypeFormatterAdapter.Instance,
+        [typeof(DataBreakpoint)] = DataBreakpointFormatterAdapter.Instance,
+        [typeof(InstructionBreakpoint)] = InstructionBreakpointFormatterAdapter.Instance,
+        [typeof(BreakpointReason)] = BreakpointReasonFormatterAdapter.Instance,
+        [typeof(Breakpoint)] = BreakpointFormatterAdapter.Instance,
+        [typeof(SteppingGranularity)] = SteppingGranularityFormatterAdapter.Instance,
+        [typeof(StepInTarget)] = StepInTargetFormatterAdapter.Instance,
+        [typeof(GotoTarget)] = GotoTargetFormatterAdapter.Instance,
+        [typeof(CompletionItem)] = CompletionItemFormatterAdapter.Instance,
+        [typeof(CompletionItemType)] = CompletionItemTypeFormatterAdapter.Instance,
+        [typeof(ChecksumAlgorithm)] = ChecksumAlgorithmFormatterAdapter.Instance,
+        [typeof(Checksum)] = ChecksumFormatterAdapter.Instance,
+        [typeof(ValueFormat)] = ValueFormatFormatterAdapter.Instance,
+        [typeof(StackFrameFormat)] = StackFrameFormatFormatterAdapter.Instance,
+        [typeof(ExceptionFilterOptions)] = ExceptionFilterOptionsFormatterAdapter.Instance,
+        [typeof(ExceptionOptions)] = ExceptionOptionsFormatterAdapter.Instance,
+        [typeof(ExceptionBreakMode)] = ExceptionBreakModeFormatterAdapter.Instance,
+        [typeof(ExceptionPathSegment)] = ExceptionPathSegmentFormatterAdapter.Instance,
+        [typeof(ExceptionDetails)] = ExceptionDetailsFormatterAdapter.Instance,
+        [typeof(DisassembledInstructionPresentationHint)] = DisassembledInstructionPresentationHintFormatterAdapter.Instance,
+        [typeof(DisassembledInstruction)] = DisassembledInstructionFormatterAdapter.Instance,
+        [typeof(BreakpointMode)] = BreakpointModeFormatterAdapter.Instance,
+    };
+    
+    static class Cache<T>
+    {
+        public static readonly INoJsonFormatter<T>? Formatter =
+            Formatters.TryGetValue(typeof(T), out var __v)
+                ? global::System.Runtime.CompilerServices.Unsafe.As<INoJsonFormatter<T>>(__v)
+                : null;
+    }
+    
     public static T Deserialize<T>(global::System.ReadOnlySpan<byte> utf8Json, NoJsonSerializerOptions? options = null)
     {
-        options ??= NoJsonSerializerOptions.Default;
-        if (typeof(T) == typeof(ProtocolMessage)) return (T)(object)ProtocolMessageFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(Request)) return (T)(object)RequestFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(Event)) return (T)(object)EventFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(Response)) return (T)(object)ResponseFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(ErrorResponseBody)) return (T)(object)ErrorResponseBodyFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(ErrorResponse)) return (T)(object)ErrorResponseFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(CancelRequest)) return (T)(object)CancelRequestFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(CancelArguments)) return (T)(object)CancelArgumentsFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(CancelResponse)) return (T)(object)CancelResponseFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(InitializedEvent)) return (T)(object)InitializedEventFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(StoppedEventBody)) return (T)(object)StoppedEventBodyFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(StoppedEvent)) return (T)(object)StoppedEventFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(ContinuedEventBody)) return (T)(object)ContinuedEventBodyFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(ContinuedEvent)) return (T)(object)ContinuedEventFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(ExitedEventBody)) return (T)(object)ExitedEventBodyFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(ExitedEvent)) return (T)(object)ExitedEventFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(TerminatedEventBody)) return (T)(object)TerminatedEventBodyFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(TerminatedEvent)) return (T)(object)TerminatedEventFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(ThreadEventBody)) return (T)(object)ThreadEventBodyFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(ThreadEvent)) return (T)(object)ThreadEventFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(OutputEventBody)) return (T)(object)OutputEventBodyFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(OutputEventBodyGroup)) return (T)(object)OutputEventBodyGroupFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(OutputEvent)) return (T)(object)OutputEventFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(BreakpointEventBody)) return (T)(object)BreakpointEventBodyFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(BreakpointEvent)) return (T)(object)BreakpointEventFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(ModuleEventBody)) return (T)(object)ModuleEventBodyFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(ModuleEventBodyReason)) return (T)(object)ModuleEventBodyReasonFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(ModuleEvent)) return (T)(object)ModuleEventFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(LoadedSourceEventBody)) return (T)(object)LoadedSourceEventBodyFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(LoadedSourceEventBodyReason)) return (T)(object)LoadedSourceEventBodyReasonFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(LoadedSourceEvent)) return (T)(object)LoadedSourceEventFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(ProcessEventBody)) return (T)(object)ProcessEventBodyFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(ProcessEventBodyStartMethod)) return (T)(object)ProcessEventBodyStartMethodFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(ProcessEvent)) return (T)(object)ProcessEventFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(CapabilitiesEventBody)) return (T)(object)CapabilitiesEventBodyFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(CapabilitiesEvent)) return (T)(object)CapabilitiesEventFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(ProgressStartEventBody)) return (T)(object)ProgressStartEventBodyFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(ProgressStartEvent)) return (T)(object)ProgressStartEventFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(ProgressUpdateEventBody)) return (T)(object)ProgressUpdateEventBodyFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(ProgressUpdateEvent)) return (T)(object)ProgressUpdateEventFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(ProgressEndEventBody)) return (T)(object)ProgressEndEventBodyFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(ProgressEndEvent)) return (T)(object)ProgressEndEventFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(InvalidatedEventBody)) return (T)(object)InvalidatedEventBodyFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(InvalidatedEvent)) return (T)(object)InvalidatedEventFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(MemoryEventBody)) return (T)(object)MemoryEventBodyFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(MemoryEvent)) return (T)(object)MemoryEventFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(RunInTerminalRequest)) return (T)(object)RunInTerminalRequestFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(RunInTerminalRequestArgumentsKind)) return (T)(object)RunInTerminalRequestArgumentsKindFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(RunInTerminalRequestArguments)) return (T)(object)RunInTerminalRequestArgumentsFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(RunInTerminalResponseBody)) return (T)(object)RunInTerminalResponseBodyFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(RunInTerminalResponse)) return (T)(object)RunInTerminalResponseFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(StartDebuggingRequest)) return (T)(object)StartDebuggingRequestFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(StartDebuggingRequestArgumentsOutputPresentation)) return (T)(object)StartDebuggingRequestArgumentsOutputPresentationFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(StartDebuggingRequestArgumentsRequest)) return (T)(object)StartDebuggingRequestArgumentsRequestFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(StartDebuggingRequestArguments)) return (T)(object)StartDebuggingRequestArgumentsFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(StartDebuggingResponse)) return (T)(object)StartDebuggingResponseFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(InitializeRequest)) return (T)(object)InitializeRequestFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(InitializeRequestArguments)) return (T)(object)InitializeRequestArgumentsFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(InitializeResponse)) return (T)(object)InitializeResponseFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(ConfigurationDoneRequest)) return (T)(object)ConfigurationDoneRequestFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(ConfigurationDoneArguments)) return (T)(object)ConfigurationDoneArgumentsFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(ConfigurationDoneResponse)) return (T)(object)ConfigurationDoneResponseFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(LaunchRequest)) return (T)(object)LaunchRequestFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(LaunchRequestArguments)) return (T)(object)LaunchRequestArgumentsFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(LaunchResponse)) return (T)(object)LaunchResponseFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(AttachRequest)) return (T)(object)AttachRequestFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(AttachRequestArguments)) return (T)(object)AttachRequestArgumentsFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(AttachResponse)) return (T)(object)AttachResponseFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(RestartRequest)) return (T)(object)RestartRequestFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(RestartArguments)) return (T)(object)RestartArgumentsFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(RestartResponse)) return (T)(object)RestartResponseFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(DisconnectRequest)) return (T)(object)DisconnectRequestFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(DisconnectArguments)) return (T)(object)DisconnectArgumentsFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(DisconnectResponse)) return (T)(object)DisconnectResponseFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(TerminateRequest)) return (T)(object)TerminateRequestFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(TerminateArguments)) return (T)(object)TerminateArgumentsFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(TerminateResponse)) return (T)(object)TerminateResponseFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(BreakpointLocationsRequest)) return (T)(object)BreakpointLocationsRequestFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(BreakpointLocationsArguments)) return (T)(object)BreakpointLocationsArgumentsFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(BreakpointLocationsResponseBody)) return (T)(object)BreakpointLocationsResponseBodyFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(BreakpointLocationsResponse)) return (T)(object)BreakpointLocationsResponseFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(SetBreakpointsRequest)) return (T)(object)SetBreakpointsRequestFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(SetBreakpointsArguments)) return (T)(object)SetBreakpointsArgumentsFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(SetBreakpointsResponseBody)) return (T)(object)SetBreakpointsResponseBodyFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(SetBreakpointsResponse)) return (T)(object)SetBreakpointsResponseFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(SetFunctionBreakpointsRequest)) return (T)(object)SetFunctionBreakpointsRequestFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(SetFunctionBreakpointsArguments)) return (T)(object)SetFunctionBreakpointsArgumentsFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(SetFunctionBreakpointsResponseBody)) return (T)(object)SetFunctionBreakpointsResponseBodyFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(SetFunctionBreakpointsResponse)) return (T)(object)SetFunctionBreakpointsResponseFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(SetExceptionBreakpointsRequest)) return (T)(object)SetExceptionBreakpointsRequestFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(SetExceptionBreakpointsArguments)) return (T)(object)SetExceptionBreakpointsArgumentsFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(SetExceptionBreakpointsResponseBody)) return (T)(object)SetExceptionBreakpointsResponseBodyFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(SetExceptionBreakpointsResponse)) return (T)(object)SetExceptionBreakpointsResponseFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(DataBreakpointInfoRequest)) return (T)(object)DataBreakpointInfoRequestFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(DataBreakpointInfoArguments)) return (T)(object)DataBreakpointInfoArgumentsFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(DataBreakpointInfoResponseBody)) return (T)(object)DataBreakpointInfoResponseBodyFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(DataBreakpointInfoResponse)) return (T)(object)DataBreakpointInfoResponseFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(SetDataBreakpointsRequest)) return (T)(object)SetDataBreakpointsRequestFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(SetDataBreakpointsArguments)) return (T)(object)SetDataBreakpointsArgumentsFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(SetDataBreakpointsResponseBody)) return (T)(object)SetDataBreakpointsResponseBodyFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(SetDataBreakpointsResponse)) return (T)(object)SetDataBreakpointsResponseFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(SetInstructionBreakpointsRequest)) return (T)(object)SetInstructionBreakpointsRequestFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(SetInstructionBreakpointsArguments)) return (T)(object)SetInstructionBreakpointsArgumentsFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(SetInstructionBreakpointsResponseBody)) return (T)(object)SetInstructionBreakpointsResponseBodyFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(SetInstructionBreakpointsResponse)) return (T)(object)SetInstructionBreakpointsResponseFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(ContinueRequest)) return (T)(object)ContinueRequestFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(ContinueArguments)) return (T)(object)ContinueArgumentsFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(ContinueResponseBody)) return (T)(object)ContinueResponseBodyFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(ContinueResponse)) return (T)(object)ContinueResponseFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(NextRequest)) return (T)(object)NextRequestFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(NextArguments)) return (T)(object)NextArgumentsFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(NextResponse)) return (T)(object)NextResponseFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(StepInRequest)) return (T)(object)StepInRequestFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(StepInArguments)) return (T)(object)StepInArgumentsFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(StepInResponse)) return (T)(object)StepInResponseFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(StepOutRequest)) return (T)(object)StepOutRequestFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(StepOutArguments)) return (T)(object)StepOutArgumentsFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(StepOutResponse)) return (T)(object)StepOutResponseFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(StepBackRequest)) return (T)(object)StepBackRequestFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(StepBackArguments)) return (T)(object)StepBackArgumentsFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(StepBackResponse)) return (T)(object)StepBackResponseFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(ReverseContinueRequest)) return (T)(object)ReverseContinueRequestFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(ReverseContinueArguments)) return (T)(object)ReverseContinueArgumentsFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(ReverseContinueResponse)) return (T)(object)ReverseContinueResponseFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(RestartFrameRequest)) return (T)(object)RestartFrameRequestFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(RestartFrameArguments)) return (T)(object)RestartFrameArgumentsFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(RestartFrameResponse)) return (T)(object)RestartFrameResponseFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(GotoRequest)) return (T)(object)GotoRequestFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(GotoArguments)) return (T)(object)GotoArgumentsFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(GotoResponse)) return (T)(object)GotoResponseFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(PauseRequest)) return (T)(object)PauseRequestFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(PauseArguments)) return (T)(object)PauseArgumentsFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(PauseResponse)) return (T)(object)PauseResponseFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(StackTraceRequest)) return (T)(object)StackTraceRequestFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(StackTraceArguments)) return (T)(object)StackTraceArgumentsFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(StackTraceResponseBody)) return (T)(object)StackTraceResponseBodyFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(StackTraceResponse)) return (T)(object)StackTraceResponseFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(ScopesRequest)) return (T)(object)ScopesRequestFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(ScopesArguments)) return (T)(object)ScopesArgumentsFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(ScopesResponseBody)) return (T)(object)ScopesResponseBodyFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(ScopesResponse)) return (T)(object)ScopesResponseFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(VariablesRequest)) return (T)(object)VariablesRequestFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(VariablesArgumentsFilter)) return (T)(object)VariablesArgumentsFilterFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(VariablesArguments)) return (T)(object)VariablesArgumentsFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(VariablesResponseBody)) return (T)(object)VariablesResponseBodyFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(VariablesResponse)) return (T)(object)VariablesResponseFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(SetVariableRequest)) return (T)(object)SetVariableRequestFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(SetVariableArguments)) return (T)(object)SetVariableArgumentsFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(SetVariableResponseBody)) return (T)(object)SetVariableResponseBodyFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(SetVariableResponse)) return (T)(object)SetVariableResponseFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(SourceRequest)) return (T)(object)SourceRequestFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(SourceArguments)) return (T)(object)SourceArgumentsFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(SourceResponseBody)) return (T)(object)SourceResponseBodyFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(SourceResponse)) return (T)(object)SourceResponseFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(ThreadsRequest)) return (T)(object)ThreadsRequestFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(ThreadsResponseBody)) return (T)(object)ThreadsResponseBodyFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(ThreadsResponse)) return (T)(object)ThreadsResponseFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(TerminateThreadsRequest)) return (T)(object)TerminateThreadsRequestFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(TerminateThreadsArguments)) return (T)(object)TerminateThreadsArgumentsFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(TerminateThreadsResponse)) return (T)(object)TerminateThreadsResponseFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(ModulesRequest)) return (T)(object)ModulesRequestFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(ModulesArguments)) return (T)(object)ModulesArgumentsFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(ModulesResponseBody)) return (T)(object)ModulesResponseBodyFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(ModulesResponse)) return (T)(object)ModulesResponseFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(LoadedSourcesRequest)) return (T)(object)LoadedSourcesRequestFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(LoadedSourcesArguments)) return (T)(object)LoadedSourcesArgumentsFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(LoadedSourcesResponseBody)) return (T)(object)LoadedSourcesResponseBodyFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(LoadedSourcesResponse)) return (T)(object)LoadedSourcesResponseFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(EvaluateRequest)) return (T)(object)EvaluateRequestFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(EvaluateArguments)) return (T)(object)EvaluateArgumentsFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(EvaluateResponseBody)) return (T)(object)EvaluateResponseBodyFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(EvaluateResponse)) return (T)(object)EvaluateResponseFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(SetExpressionRequest)) return (T)(object)SetExpressionRequestFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(SetExpressionArguments)) return (T)(object)SetExpressionArgumentsFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(SetExpressionResponseBody)) return (T)(object)SetExpressionResponseBodyFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(SetExpressionResponse)) return (T)(object)SetExpressionResponseFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(StepInTargetsRequest)) return (T)(object)StepInTargetsRequestFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(StepInTargetsArguments)) return (T)(object)StepInTargetsArgumentsFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(StepInTargetsResponseBody)) return (T)(object)StepInTargetsResponseBodyFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(StepInTargetsResponse)) return (T)(object)StepInTargetsResponseFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(GotoTargetsRequest)) return (T)(object)GotoTargetsRequestFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(GotoTargetsArguments)) return (T)(object)GotoTargetsArgumentsFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(GotoTargetsResponseBody)) return (T)(object)GotoTargetsResponseBodyFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(GotoTargetsResponse)) return (T)(object)GotoTargetsResponseFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(CompletionsRequest)) return (T)(object)CompletionsRequestFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(CompletionsArguments)) return (T)(object)CompletionsArgumentsFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(CompletionsResponseBody)) return (T)(object)CompletionsResponseBodyFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(CompletionsResponse)) return (T)(object)CompletionsResponseFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(ExceptionInfoRequest)) return (T)(object)ExceptionInfoRequestFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(ExceptionInfoArguments)) return (T)(object)ExceptionInfoArgumentsFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(ExceptionInfoResponseBody)) return (T)(object)ExceptionInfoResponseBodyFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(ExceptionInfoResponse)) return (T)(object)ExceptionInfoResponseFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(ReadMemoryRequest)) return (T)(object)ReadMemoryRequestFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(ReadMemoryArguments)) return (T)(object)ReadMemoryArgumentsFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(ReadMemoryResponseBody)) return (T)(object)ReadMemoryResponseBodyFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(ReadMemoryResponse)) return (T)(object)ReadMemoryResponseFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(WriteMemoryRequest)) return (T)(object)WriteMemoryRequestFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(WriteMemoryArguments)) return (T)(object)WriteMemoryArgumentsFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(WriteMemoryResponseBody)) return (T)(object)WriteMemoryResponseBodyFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(WriteMemoryResponse)) return (T)(object)WriteMemoryResponseFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(DisassembleRequest)) return (T)(object)DisassembleRequestFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(DisassembleArguments)) return (T)(object)DisassembleArgumentsFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(DisassembleResponseBody)) return (T)(object)DisassembleResponseBodyFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(DisassembleResponse)) return (T)(object)DisassembleResponseFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(LocationsRequest)) return (T)(object)LocationsRequestFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(LocationsArguments)) return (T)(object)LocationsArgumentsFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(LocationsResponseBody)) return (T)(object)LocationsResponseBodyFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(LocationsResponse)) return (T)(object)LocationsResponseFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(Capabilities)) return (T)(object)CapabilitiesFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(ExceptionBreakpointsFilter)) return (T)(object)ExceptionBreakpointsFilterFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(Message)) return (T)(object)MessageFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(Module)) return (T)(object)ModuleFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(ColumnDescriptorType)) return (T)(object)ColumnDescriptorTypeFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(ColumnDescriptor)) return (T)(object)ColumnDescriptorFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(Thread)) return (T)(object)ThreadFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(SourcePresentationHint)) return (T)(object)SourcePresentationHintFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(Source)) return (T)(object)SourceFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(StackFramePresentationHint)) return (T)(object)StackFramePresentationHintFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(StackFrame)) return (T)(object)StackFrameFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(Scope)) return (T)(object)ScopeFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(Variable)) return (T)(object)VariableFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(VariablePresentationHint)) return (T)(object)VariablePresentationHintFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(BreakpointLocation)) return (T)(object)BreakpointLocationFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(SourceBreakpoint)) return (T)(object)SourceBreakpointFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(FunctionBreakpoint)) return (T)(object)FunctionBreakpointFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(DataBreakpointAccessType)) return (T)(object)DataBreakpointAccessTypeFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(DataBreakpoint)) return (T)(object)DataBreakpointFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(InstructionBreakpoint)) return (T)(object)InstructionBreakpointFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(BreakpointReason)) return (T)(object)BreakpointReasonFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(Breakpoint)) return (T)(object)BreakpointFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(SteppingGranularity)) return (T)(object)SteppingGranularityFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(StepInTarget)) return (T)(object)StepInTargetFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(GotoTarget)) return (T)(object)GotoTargetFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(CompletionItem)) return (T)(object)CompletionItemFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(CompletionItemType)) return (T)(object)CompletionItemTypeFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(ChecksumAlgorithm)) return (T)(object)ChecksumAlgorithmFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(Checksum)) return (T)(object)ChecksumFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(ValueFormat)) return (T)(object)ValueFormatFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(StackFrameFormat)) return (T)(object)StackFrameFormatFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(ExceptionFilterOptions)) return (T)(object)ExceptionFilterOptionsFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(ExceptionOptions)) return (T)(object)ExceptionOptionsFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(ExceptionBreakMode)) return (T)(object)ExceptionBreakModeFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(ExceptionPathSegment)) return (T)(object)ExceptionPathSegmentFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(ExceptionDetails)) return (T)(object)ExceptionDetailsFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(DisassembledInstructionPresentationHint)) return (T)(object)DisassembledInstructionPresentationHintFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(DisassembledInstruction)) return (T)(object)DisassembledInstructionFormatter.Deserialize(utf8Json, options)!;
-        if (typeof(T) == typeof(BreakpointMode)) return (T)(object)BreakpointModeFormatter.Deserialize(utf8Json, options)!;
-        throw new global::System.NotSupportedException("No formatter generated for " + typeof(T).FullName);
+        var formatter = Cache<T>.Formatter;
+        if (formatter is null) ThrowNotSupported<T>();
+        return formatter!.Deserialize(utf8Json, options ?? NoJsonSerializerOptions.Default);
     }
     
     public static T Deserialize<T>(byte[] utf8Json, NoJsonSerializerOptions? options = null) => Deserialize<T>((global::System.ReadOnlySpan<byte>)utf8Json, options);
     
     public static void Serialize<T>(global::System.Buffers.IBufferWriter<byte> writer, T value, NoJsonSerializerOptions? options = null)
     {
-        options ??= NoJsonSerializerOptions.Default;
-        if (typeof(T) == typeof(ProtocolMessage)) { ProtocolMessageFormatter.Serialize(writer, ((ProtocolMessage)(object)value!), options); return; }
-        if (typeof(T) == typeof(Request)) { RequestFormatter.Serialize(writer, ((Request)(object)value!), options); return; }
-        if (typeof(T) == typeof(Event)) { EventFormatter.Serialize(writer, ((Event)(object)value!), options); return; }
-        if (typeof(T) == typeof(Response)) { ResponseFormatter.Serialize(writer, ((Response)(object)value!), options); return; }
-        if (typeof(T) == typeof(ErrorResponseBody)) { ErrorResponseBodyFormatter.Serialize(writer, ((ErrorResponseBody)(object)value!), options); return; }
-        if (typeof(T) == typeof(ErrorResponse)) { ErrorResponseFormatter.Serialize(writer, ((ErrorResponse)(object)value!), options); return; }
-        if (typeof(T) == typeof(CancelRequest)) { CancelRequestFormatter.Serialize(writer, ((CancelRequest)(object)value!), options); return; }
-        if (typeof(T) == typeof(CancelArguments)) { CancelArgumentsFormatter.Serialize(writer, ((CancelArguments)(object)value!), options); return; }
-        if (typeof(T) == typeof(CancelResponse)) { CancelResponseFormatter.Serialize(writer, ((CancelResponse)(object)value!), options); return; }
-        if (typeof(T) == typeof(InitializedEvent)) { InitializedEventFormatter.Serialize(writer, ((InitializedEvent)(object)value!), options); return; }
-        if (typeof(T) == typeof(StoppedEventBody)) { StoppedEventBodyFormatter.Serialize(writer, ((StoppedEventBody)(object)value!), options); return; }
-        if (typeof(T) == typeof(StoppedEvent)) { StoppedEventFormatter.Serialize(writer, ((StoppedEvent)(object)value!), options); return; }
-        if (typeof(T) == typeof(ContinuedEventBody)) { ContinuedEventBodyFormatter.Serialize(writer, ((ContinuedEventBody)(object)value!), options); return; }
-        if (typeof(T) == typeof(ContinuedEvent)) { ContinuedEventFormatter.Serialize(writer, ((ContinuedEvent)(object)value!), options); return; }
-        if (typeof(T) == typeof(ExitedEventBody)) { ExitedEventBodyFormatter.Serialize(writer, ((ExitedEventBody)(object)value!), options); return; }
-        if (typeof(T) == typeof(ExitedEvent)) { ExitedEventFormatter.Serialize(writer, ((ExitedEvent)(object)value!), options); return; }
-        if (typeof(T) == typeof(TerminatedEventBody)) { TerminatedEventBodyFormatter.Serialize(writer, ((TerminatedEventBody)(object)value!), options); return; }
-        if (typeof(T) == typeof(TerminatedEvent)) { TerminatedEventFormatter.Serialize(writer, ((TerminatedEvent)(object)value!), options); return; }
-        if (typeof(T) == typeof(ThreadEventBody)) { ThreadEventBodyFormatter.Serialize(writer, ((ThreadEventBody)(object)value!), options); return; }
-        if (typeof(T) == typeof(ThreadEvent)) { ThreadEventFormatter.Serialize(writer, ((ThreadEvent)(object)value!), options); return; }
-        if (typeof(T) == typeof(OutputEventBody)) { OutputEventBodyFormatter.Serialize(writer, ((OutputEventBody)(object)value!), options); return; }
-        if (typeof(T) == typeof(OutputEventBodyGroup)) { OutputEventBodyGroupFormatter.Serialize(writer, (OutputEventBodyGroup)(object)value!, options); return; }
-        if (typeof(T) == typeof(OutputEvent)) { OutputEventFormatter.Serialize(writer, ((OutputEvent)(object)value!), options); return; }
-        if (typeof(T) == typeof(BreakpointEventBody)) { BreakpointEventBodyFormatter.Serialize(writer, ((BreakpointEventBody)(object)value!), options); return; }
-        if (typeof(T) == typeof(BreakpointEvent)) { BreakpointEventFormatter.Serialize(writer, ((BreakpointEvent)(object)value!), options); return; }
-        if (typeof(T) == typeof(ModuleEventBody)) { ModuleEventBodyFormatter.Serialize(writer, ((ModuleEventBody)(object)value!), options); return; }
-        if (typeof(T) == typeof(ModuleEventBodyReason)) { ModuleEventBodyReasonFormatter.Serialize(writer, (ModuleEventBodyReason)(object)value!, options); return; }
-        if (typeof(T) == typeof(ModuleEvent)) { ModuleEventFormatter.Serialize(writer, ((ModuleEvent)(object)value!), options); return; }
-        if (typeof(T) == typeof(LoadedSourceEventBody)) { LoadedSourceEventBodyFormatter.Serialize(writer, ((LoadedSourceEventBody)(object)value!), options); return; }
-        if (typeof(T) == typeof(LoadedSourceEventBodyReason)) { LoadedSourceEventBodyReasonFormatter.Serialize(writer, (LoadedSourceEventBodyReason)(object)value!, options); return; }
-        if (typeof(T) == typeof(LoadedSourceEvent)) { LoadedSourceEventFormatter.Serialize(writer, ((LoadedSourceEvent)(object)value!), options); return; }
-        if (typeof(T) == typeof(ProcessEventBody)) { ProcessEventBodyFormatter.Serialize(writer, ((ProcessEventBody)(object)value!), options); return; }
-        if (typeof(T) == typeof(ProcessEventBodyStartMethod)) { ProcessEventBodyStartMethodFormatter.Serialize(writer, (ProcessEventBodyStartMethod)(object)value!, options); return; }
-        if (typeof(T) == typeof(ProcessEvent)) { ProcessEventFormatter.Serialize(writer, ((ProcessEvent)(object)value!), options); return; }
-        if (typeof(T) == typeof(CapabilitiesEventBody)) { CapabilitiesEventBodyFormatter.Serialize(writer, ((CapabilitiesEventBody)(object)value!), options); return; }
-        if (typeof(T) == typeof(CapabilitiesEvent)) { CapabilitiesEventFormatter.Serialize(writer, ((CapabilitiesEvent)(object)value!), options); return; }
-        if (typeof(T) == typeof(ProgressStartEventBody)) { ProgressStartEventBodyFormatter.Serialize(writer, ((ProgressStartEventBody)(object)value!), options); return; }
-        if (typeof(T) == typeof(ProgressStartEvent)) { ProgressStartEventFormatter.Serialize(writer, ((ProgressStartEvent)(object)value!), options); return; }
-        if (typeof(T) == typeof(ProgressUpdateEventBody)) { ProgressUpdateEventBodyFormatter.Serialize(writer, ((ProgressUpdateEventBody)(object)value!), options); return; }
-        if (typeof(T) == typeof(ProgressUpdateEvent)) { ProgressUpdateEventFormatter.Serialize(writer, ((ProgressUpdateEvent)(object)value!), options); return; }
-        if (typeof(T) == typeof(ProgressEndEventBody)) { ProgressEndEventBodyFormatter.Serialize(writer, ((ProgressEndEventBody)(object)value!), options); return; }
-        if (typeof(T) == typeof(ProgressEndEvent)) { ProgressEndEventFormatter.Serialize(writer, ((ProgressEndEvent)(object)value!), options); return; }
-        if (typeof(T) == typeof(InvalidatedEventBody)) { InvalidatedEventBodyFormatter.Serialize(writer, ((InvalidatedEventBody)(object)value!), options); return; }
-        if (typeof(T) == typeof(InvalidatedEvent)) { InvalidatedEventFormatter.Serialize(writer, ((InvalidatedEvent)(object)value!), options); return; }
-        if (typeof(T) == typeof(MemoryEventBody)) { MemoryEventBodyFormatter.Serialize(writer, ((MemoryEventBody)(object)value!), options); return; }
-        if (typeof(T) == typeof(MemoryEvent)) { MemoryEventFormatter.Serialize(writer, ((MemoryEvent)(object)value!), options); return; }
-        if (typeof(T) == typeof(RunInTerminalRequest)) { RunInTerminalRequestFormatter.Serialize(writer, ((RunInTerminalRequest)(object)value!), options); return; }
-        if (typeof(T) == typeof(RunInTerminalRequestArgumentsKind)) { RunInTerminalRequestArgumentsKindFormatter.Serialize(writer, (RunInTerminalRequestArgumentsKind)(object)value!, options); return; }
-        if (typeof(T) == typeof(RunInTerminalRequestArguments)) { RunInTerminalRequestArgumentsFormatter.Serialize(writer, ((RunInTerminalRequestArguments)(object)value!), options); return; }
-        if (typeof(T) == typeof(RunInTerminalResponseBody)) { RunInTerminalResponseBodyFormatter.Serialize(writer, ((RunInTerminalResponseBody)(object)value!), options); return; }
-        if (typeof(T) == typeof(RunInTerminalResponse)) { RunInTerminalResponseFormatter.Serialize(writer, ((RunInTerminalResponse)(object)value!), options); return; }
-        if (typeof(T) == typeof(StartDebuggingRequest)) { StartDebuggingRequestFormatter.Serialize(writer, ((StartDebuggingRequest)(object)value!), options); return; }
-        if (typeof(T) == typeof(StartDebuggingRequestArgumentsOutputPresentation)) { StartDebuggingRequestArgumentsOutputPresentationFormatter.Serialize(writer, (StartDebuggingRequestArgumentsOutputPresentation)(object)value!, options); return; }
-        if (typeof(T) == typeof(StartDebuggingRequestArgumentsRequest)) { StartDebuggingRequestArgumentsRequestFormatter.Serialize(writer, (StartDebuggingRequestArgumentsRequest)(object)value!, options); return; }
-        if (typeof(T) == typeof(StartDebuggingRequestArguments)) { StartDebuggingRequestArgumentsFormatter.Serialize(writer, ((StartDebuggingRequestArguments)(object)value!), options); return; }
-        if (typeof(T) == typeof(StartDebuggingResponse)) { StartDebuggingResponseFormatter.Serialize(writer, ((StartDebuggingResponse)(object)value!), options); return; }
-        if (typeof(T) == typeof(InitializeRequest)) { InitializeRequestFormatter.Serialize(writer, ((InitializeRequest)(object)value!), options); return; }
-        if (typeof(T) == typeof(InitializeRequestArguments)) { InitializeRequestArgumentsFormatter.Serialize(writer, ((InitializeRequestArguments)(object)value!), options); return; }
-        if (typeof(T) == typeof(InitializeResponse)) { InitializeResponseFormatter.Serialize(writer, ((InitializeResponse)(object)value!), options); return; }
-        if (typeof(T) == typeof(ConfigurationDoneRequest)) { ConfigurationDoneRequestFormatter.Serialize(writer, ((ConfigurationDoneRequest)(object)value!), options); return; }
-        if (typeof(T) == typeof(ConfigurationDoneArguments)) { ConfigurationDoneArgumentsFormatter.Serialize(writer, ((ConfigurationDoneArguments)(object)value!), options); return; }
-        if (typeof(T) == typeof(ConfigurationDoneResponse)) { ConfigurationDoneResponseFormatter.Serialize(writer, ((ConfigurationDoneResponse)(object)value!), options); return; }
-        if (typeof(T) == typeof(LaunchRequest)) { LaunchRequestFormatter.Serialize(writer, ((LaunchRequest)(object)value!), options); return; }
-        if (typeof(T) == typeof(LaunchRequestArguments)) { LaunchRequestArgumentsFormatter.Serialize(writer, ((LaunchRequestArguments)(object)value!), options); return; }
-        if (typeof(T) == typeof(LaunchResponse)) { LaunchResponseFormatter.Serialize(writer, ((LaunchResponse)(object)value!), options); return; }
-        if (typeof(T) == typeof(AttachRequest)) { AttachRequestFormatter.Serialize(writer, ((AttachRequest)(object)value!), options); return; }
-        if (typeof(T) == typeof(AttachRequestArguments)) { AttachRequestArgumentsFormatter.Serialize(writer, ((AttachRequestArguments)(object)value!), options); return; }
-        if (typeof(T) == typeof(AttachResponse)) { AttachResponseFormatter.Serialize(writer, ((AttachResponse)(object)value!), options); return; }
-        if (typeof(T) == typeof(RestartRequest)) { RestartRequestFormatter.Serialize(writer, ((RestartRequest)(object)value!), options); return; }
-        if (typeof(T) == typeof(RestartArguments)) { RestartArgumentsFormatter.Serialize(writer, ((RestartArguments)(object)value!), options); return; }
-        if (typeof(T) == typeof(RestartResponse)) { RestartResponseFormatter.Serialize(writer, ((RestartResponse)(object)value!), options); return; }
-        if (typeof(T) == typeof(DisconnectRequest)) { DisconnectRequestFormatter.Serialize(writer, ((DisconnectRequest)(object)value!), options); return; }
-        if (typeof(T) == typeof(DisconnectArguments)) { DisconnectArgumentsFormatter.Serialize(writer, ((DisconnectArguments)(object)value!), options); return; }
-        if (typeof(T) == typeof(DisconnectResponse)) { DisconnectResponseFormatter.Serialize(writer, ((DisconnectResponse)(object)value!), options); return; }
-        if (typeof(T) == typeof(TerminateRequest)) { TerminateRequestFormatter.Serialize(writer, ((TerminateRequest)(object)value!), options); return; }
-        if (typeof(T) == typeof(TerminateArguments)) { TerminateArgumentsFormatter.Serialize(writer, ((TerminateArguments)(object)value!), options); return; }
-        if (typeof(T) == typeof(TerminateResponse)) { TerminateResponseFormatter.Serialize(writer, ((TerminateResponse)(object)value!), options); return; }
-        if (typeof(T) == typeof(BreakpointLocationsRequest)) { BreakpointLocationsRequestFormatter.Serialize(writer, ((BreakpointLocationsRequest)(object)value!), options); return; }
-        if (typeof(T) == typeof(BreakpointLocationsArguments)) { BreakpointLocationsArgumentsFormatter.Serialize(writer, ((BreakpointLocationsArguments)(object)value!), options); return; }
-        if (typeof(T) == typeof(BreakpointLocationsResponseBody)) { BreakpointLocationsResponseBodyFormatter.Serialize(writer, ((BreakpointLocationsResponseBody)(object)value!), options); return; }
-        if (typeof(T) == typeof(BreakpointLocationsResponse)) { BreakpointLocationsResponseFormatter.Serialize(writer, ((BreakpointLocationsResponse)(object)value!), options); return; }
-        if (typeof(T) == typeof(SetBreakpointsRequest)) { SetBreakpointsRequestFormatter.Serialize(writer, ((SetBreakpointsRequest)(object)value!), options); return; }
-        if (typeof(T) == typeof(SetBreakpointsArguments)) { SetBreakpointsArgumentsFormatter.Serialize(writer, ((SetBreakpointsArguments)(object)value!), options); return; }
-        if (typeof(T) == typeof(SetBreakpointsResponseBody)) { SetBreakpointsResponseBodyFormatter.Serialize(writer, ((SetBreakpointsResponseBody)(object)value!), options); return; }
-        if (typeof(T) == typeof(SetBreakpointsResponse)) { SetBreakpointsResponseFormatter.Serialize(writer, ((SetBreakpointsResponse)(object)value!), options); return; }
-        if (typeof(T) == typeof(SetFunctionBreakpointsRequest)) { SetFunctionBreakpointsRequestFormatter.Serialize(writer, ((SetFunctionBreakpointsRequest)(object)value!), options); return; }
-        if (typeof(T) == typeof(SetFunctionBreakpointsArguments)) { SetFunctionBreakpointsArgumentsFormatter.Serialize(writer, ((SetFunctionBreakpointsArguments)(object)value!), options); return; }
-        if (typeof(T) == typeof(SetFunctionBreakpointsResponseBody)) { SetFunctionBreakpointsResponseBodyFormatter.Serialize(writer, ((SetFunctionBreakpointsResponseBody)(object)value!), options); return; }
-        if (typeof(T) == typeof(SetFunctionBreakpointsResponse)) { SetFunctionBreakpointsResponseFormatter.Serialize(writer, ((SetFunctionBreakpointsResponse)(object)value!), options); return; }
-        if (typeof(T) == typeof(SetExceptionBreakpointsRequest)) { SetExceptionBreakpointsRequestFormatter.Serialize(writer, ((SetExceptionBreakpointsRequest)(object)value!), options); return; }
-        if (typeof(T) == typeof(SetExceptionBreakpointsArguments)) { SetExceptionBreakpointsArgumentsFormatter.Serialize(writer, ((SetExceptionBreakpointsArguments)(object)value!), options); return; }
-        if (typeof(T) == typeof(SetExceptionBreakpointsResponseBody)) { SetExceptionBreakpointsResponseBodyFormatter.Serialize(writer, ((SetExceptionBreakpointsResponseBody)(object)value!), options); return; }
-        if (typeof(T) == typeof(SetExceptionBreakpointsResponse)) { SetExceptionBreakpointsResponseFormatter.Serialize(writer, ((SetExceptionBreakpointsResponse)(object)value!), options); return; }
-        if (typeof(T) == typeof(DataBreakpointInfoRequest)) { DataBreakpointInfoRequestFormatter.Serialize(writer, ((DataBreakpointInfoRequest)(object)value!), options); return; }
-        if (typeof(T) == typeof(DataBreakpointInfoArguments)) { DataBreakpointInfoArgumentsFormatter.Serialize(writer, ((DataBreakpointInfoArguments)(object)value!), options); return; }
-        if (typeof(T) == typeof(DataBreakpointInfoResponseBody)) { DataBreakpointInfoResponseBodyFormatter.Serialize(writer, ((DataBreakpointInfoResponseBody)(object)value!), options); return; }
-        if (typeof(T) == typeof(DataBreakpointInfoResponse)) { DataBreakpointInfoResponseFormatter.Serialize(writer, ((DataBreakpointInfoResponse)(object)value!), options); return; }
-        if (typeof(T) == typeof(SetDataBreakpointsRequest)) { SetDataBreakpointsRequestFormatter.Serialize(writer, ((SetDataBreakpointsRequest)(object)value!), options); return; }
-        if (typeof(T) == typeof(SetDataBreakpointsArguments)) { SetDataBreakpointsArgumentsFormatter.Serialize(writer, ((SetDataBreakpointsArguments)(object)value!), options); return; }
-        if (typeof(T) == typeof(SetDataBreakpointsResponseBody)) { SetDataBreakpointsResponseBodyFormatter.Serialize(writer, ((SetDataBreakpointsResponseBody)(object)value!), options); return; }
-        if (typeof(T) == typeof(SetDataBreakpointsResponse)) { SetDataBreakpointsResponseFormatter.Serialize(writer, ((SetDataBreakpointsResponse)(object)value!), options); return; }
-        if (typeof(T) == typeof(SetInstructionBreakpointsRequest)) { SetInstructionBreakpointsRequestFormatter.Serialize(writer, ((SetInstructionBreakpointsRequest)(object)value!), options); return; }
-        if (typeof(T) == typeof(SetInstructionBreakpointsArguments)) { SetInstructionBreakpointsArgumentsFormatter.Serialize(writer, ((SetInstructionBreakpointsArguments)(object)value!), options); return; }
-        if (typeof(T) == typeof(SetInstructionBreakpointsResponseBody)) { SetInstructionBreakpointsResponseBodyFormatter.Serialize(writer, ((SetInstructionBreakpointsResponseBody)(object)value!), options); return; }
-        if (typeof(T) == typeof(SetInstructionBreakpointsResponse)) { SetInstructionBreakpointsResponseFormatter.Serialize(writer, ((SetInstructionBreakpointsResponse)(object)value!), options); return; }
-        if (typeof(T) == typeof(ContinueRequest)) { ContinueRequestFormatter.Serialize(writer, ((ContinueRequest)(object)value!), options); return; }
-        if (typeof(T) == typeof(ContinueArguments)) { ContinueArgumentsFormatter.Serialize(writer, ((ContinueArguments)(object)value!), options); return; }
-        if (typeof(T) == typeof(ContinueResponseBody)) { ContinueResponseBodyFormatter.Serialize(writer, ((ContinueResponseBody)(object)value!), options); return; }
-        if (typeof(T) == typeof(ContinueResponse)) { ContinueResponseFormatter.Serialize(writer, ((ContinueResponse)(object)value!), options); return; }
-        if (typeof(T) == typeof(NextRequest)) { NextRequestFormatter.Serialize(writer, ((NextRequest)(object)value!), options); return; }
-        if (typeof(T) == typeof(NextArguments)) { NextArgumentsFormatter.Serialize(writer, ((NextArguments)(object)value!), options); return; }
-        if (typeof(T) == typeof(NextResponse)) { NextResponseFormatter.Serialize(writer, ((NextResponse)(object)value!), options); return; }
-        if (typeof(T) == typeof(StepInRequest)) { StepInRequestFormatter.Serialize(writer, ((StepInRequest)(object)value!), options); return; }
-        if (typeof(T) == typeof(StepInArguments)) { StepInArgumentsFormatter.Serialize(writer, ((StepInArguments)(object)value!), options); return; }
-        if (typeof(T) == typeof(StepInResponse)) { StepInResponseFormatter.Serialize(writer, ((StepInResponse)(object)value!), options); return; }
-        if (typeof(T) == typeof(StepOutRequest)) { StepOutRequestFormatter.Serialize(writer, ((StepOutRequest)(object)value!), options); return; }
-        if (typeof(T) == typeof(StepOutArguments)) { StepOutArgumentsFormatter.Serialize(writer, ((StepOutArguments)(object)value!), options); return; }
-        if (typeof(T) == typeof(StepOutResponse)) { StepOutResponseFormatter.Serialize(writer, ((StepOutResponse)(object)value!), options); return; }
-        if (typeof(T) == typeof(StepBackRequest)) { StepBackRequestFormatter.Serialize(writer, ((StepBackRequest)(object)value!), options); return; }
-        if (typeof(T) == typeof(StepBackArguments)) { StepBackArgumentsFormatter.Serialize(writer, ((StepBackArguments)(object)value!), options); return; }
-        if (typeof(T) == typeof(StepBackResponse)) { StepBackResponseFormatter.Serialize(writer, ((StepBackResponse)(object)value!), options); return; }
-        if (typeof(T) == typeof(ReverseContinueRequest)) { ReverseContinueRequestFormatter.Serialize(writer, ((ReverseContinueRequest)(object)value!), options); return; }
-        if (typeof(T) == typeof(ReverseContinueArguments)) { ReverseContinueArgumentsFormatter.Serialize(writer, ((ReverseContinueArguments)(object)value!), options); return; }
-        if (typeof(T) == typeof(ReverseContinueResponse)) { ReverseContinueResponseFormatter.Serialize(writer, ((ReverseContinueResponse)(object)value!), options); return; }
-        if (typeof(T) == typeof(RestartFrameRequest)) { RestartFrameRequestFormatter.Serialize(writer, ((RestartFrameRequest)(object)value!), options); return; }
-        if (typeof(T) == typeof(RestartFrameArguments)) { RestartFrameArgumentsFormatter.Serialize(writer, ((RestartFrameArguments)(object)value!), options); return; }
-        if (typeof(T) == typeof(RestartFrameResponse)) { RestartFrameResponseFormatter.Serialize(writer, ((RestartFrameResponse)(object)value!), options); return; }
-        if (typeof(T) == typeof(GotoRequest)) { GotoRequestFormatter.Serialize(writer, ((GotoRequest)(object)value!), options); return; }
-        if (typeof(T) == typeof(GotoArguments)) { GotoArgumentsFormatter.Serialize(writer, ((GotoArguments)(object)value!), options); return; }
-        if (typeof(T) == typeof(GotoResponse)) { GotoResponseFormatter.Serialize(writer, ((GotoResponse)(object)value!), options); return; }
-        if (typeof(T) == typeof(PauseRequest)) { PauseRequestFormatter.Serialize(writer, ((PauseRequest)(object)value!), options); return; }
-        if (typeof(T) == typeof(PauseArguments)) { PauseArgumentsFormatter.Serialize(writer, ((PauseArguments)(object)value!), options); return; }
-        if (typeof(T) == typeof(PauseResponse)) { PauseResponseFormatter.Serialize(writer, ((PauseResponse)(object)value!), options); return; }
-        if (typeof(T) == typeof(StackTraceRequest)) { StackTraceRequestFormatter.Serialize(writer, ((StackTraceRequest)(object)value!), options); return; }
-        if (typeof(T) == typeof(StackTraceArguments)) { StackTraceArgumentsFormatter.Serialize(writer, ((StackTraceArguments)(object)value!), options); return; }
-        if (typeof(T) == typeof(StackTraceResponseBody)) { StackTraceResponseBodyFormatter.Serialize(writer, ((StackTraceResponseBody)(object)value!), options); return; }
-        if (typeof(T) == typeof(StackTraceResponse)) { StackTraceResponseFormatter.Serialize(writer, ((StackTraceResponse)(object)value!), options); return; }
-        if (typeof(T) == typeof(ScopesRequest)) { ScopesRequestFormatter.Serialize(writer, ((ScopesRequest)(object)value!), options); return; }
-        if (typeof(T) == typeof(ScopesArguments)) { ScopesArgumentsFormatter.Serialize(writer, ((ScopesArguments)(object)value!), options); return; }
-        if (typeof(T) == typeof(ScopesResponseBody)) { ScopesResponseBodyFormatter.Serialize(writer, ((ScopesResponseBody)(object)value!), options); return; }
-        if (typeof(T) == typeof(ScopesResponse)) { ScopesResponseFormatter.Serialize(writer, ((ScopesResponse)(object)value!), options); return; }
-        if (typeof(T) == typeof(VariablesRequest)) { VariablesRequestFormatter.Serialize(writer, ((VariablesRequest)(object)value!), options); return; }
-        if (typeof(T) == typeof(VariablesArgumentsFilter)) { VariablesArgumentsFilterFormatter.Serialize(writer, (VariablesArgumentsFilter)(object)value!, options); return; }
-        if (typeof(T) == typeof(VariablesArguments)) { VariablesArgumentsFormatter.Serialize(writer, ((VariablesArguments)(object)value!), options); return; }
-        if (typeof(T) == typeof(VariablesResponseBody)) { VariablesResponseBodyFormatter.Serialize(writer, ((VariablesResponseBody)(object)value!), options); return; }
-        if (typeof(T) == typeof(VariablesResponse)) { VariablesResponseFormatter.Serialize(writer, ((VariablesResponse)(object)value!), options); return; }
-        if (typeof(T) == typeof(SetVariableRequest)) { SetVariableRequestFormatter.Serialize(writer, ((SetVariableRequest)(object)value!), options); return; }
-        if (typeof(T) == typeof(SetVariableArguments)) { SetVariableArgumentsFormatter.Serialize(writer, ((SetVariableArguments)(object)value!), options); return; }
-        if (typeof(T) == typeof(SetVariableResponseBody)) { SetVariableResponseBodyFormatter.Serialize(writer, ((SetVariableResponseBody)(object)value!), options); return; }
-        if (typeof(T) == typeof(SetVariableResponse)) { SetVariableResponseFormatter.Serialize(writer, ((SetVariableResponse)(object)value!), options); return; }
-        if (typeof(T) == typeof(SourceRequest)) { SourceRequestFormatter.Serialize(writer, ((SourceRequest)(object)value!), options); return; }
-        if (typeof(T) == typeof(SourceArguments)) { SourceArgumentsFormatter.Serialize(writer, ((SourceArguments)(object)value!), options); return; }
-        if (typeof(T) == typeof(SourceResponseBody)) { SourceResponseBodyFormatter.Serialize(writer, ((SourceResponseBody)(object)value!), options); return; }
-        if (typeof(T) == typeof(SourceResponse)) { SourceResponseFormatter.Serialize(writer, ((SourceResponse)(object)value!), options); return; }
-        if (typeof(T) == typeof(ThreadsRequest)) { ThreadsRequestFormatter.Serialize(writer, ((ThreadsRequest)(object)value!), options); return; }
-        if (typeof(T) == typeof(ThreadsResponseBody)) { ThreadsResponseBodyFormatter.Serialize(writer, ((ThreadsResponseBody)(object)value!), options); return; }
-        if (typeof(T) == typeof(ThreadsResponse)) { ThreadsResponseFormatter.Serialize(writer, ((ThreadsResponse)(object)value!), options); return; }
-        if (typeof(T) == typeof(TerminateThreadsRequest)) { TerminateThreadsRequestFormatter.Serialize(writer, ((TerminateThreadsRequest)(object)value!), options); return; }
-        if (typeof(T) == typeof(TerminateThreadsArguments)) { TerminateThreadsArgumentsFormatter.Serialize(writer, ((TerminateThreadsArguments)(object)value!), options); return; }
-        if (typeof(T) == typeof(TerminateThreadsResponse)) { TerminateThreadsResponseFormatter.Serialize(writer, ((TerminateThreadsResponse)(object)value!), options); return; }
-        if (typeof(T) == typeof(ModulesRequest)) { ModulesRequestFormatter.Serialize(writer, ((ModulesRequest)(object)value!), options); return; }
-        if (typeof(T) == typeof(ModulesArguments)) { ModulesArgumentsFormatter.Serialize(writer, ((ModulesArguments)(object)value!), options); return; }
-        if (typeof(T) == typeof(ModulesResponseBody)) { ModulesResponseBodyFormatter.Serialize(writer, ((ModulesResponseBody)(object)value!), options); return; }
-        if (typeof(T) == typeof(ModulesResponse)) { ModulesResponseFormatter.Serialize(writer, ((ModulesResponse)(object)value!), options); return; }
-        if (typeof(T) == typeof(LoadedSourcesRequest)) { LoadedSourcesRequestFormatter.Serialize(writer, ((LoadedSourcesRequest)(object)value!), options); return; }
-        if (typeof(T) == typeof(LoadedSourcesArguments)) { LoadedSourcesArgumentsFormatter.Serialize(writer, ((LoadedSourcesArguments)(object)value!), options); return; }
-        if (typeof(T) == typeof(LoadedSourcesResponseBody)) { LoadedSourcesResponseBodyFormatter.Serialize(writer, ((LoadedSourcesResponseBody)(object)value!), options); return; }
-        if (typeof(T) == typeof(LoadedSourcesResponse)) { LoadedSourcesResponseFormatter.Serialize(writer, ((LoadedSourcesResponse)(object)value!), options); return; }
-        if (typeof(T) == typeof(EvaluateRequest)) { EvaluateRequestFormatter.Serialize(writer, ((EvaluateRequest)(object)value!), options); return; }
-        if (typeof(T) == typeof(EvaluateArguments)) { EvaluateArgumentsFormatter.Serialize(writer, ((EvaluateArguments)(object)value!), options); return; }
-        if (typeof(T) == typeof(EvaluateResponseBody)) { EvaluateResponseBodyFormatter.Serialize(writer, ((EvaluateResponseBody)(object)value!), options); return; }
-        if (typeof(T) == typeof(EvaluateResponse)) { EvaluateResponseFormatter.Serialize(writer, ((EvaluateResponse)(object)value!), options); return; }
-        if (typeof(T) == typeof(SetExpressionRequest)) { SetExpressionRequestFormatter.Serialize(writer, ((SetExpressionRequest)(object)value!), options); return; }
-        if (typeof(T) == typeof(SetExpressionArguments)) { SetExpressionArgumentsFormatter.Serialize(writer, ((SetExpressionArguments)(object)value!), options); return; }
-        if (typeof(T) == typeof(SetExpressionResponseBody)) { SetExpressionResponseBodyFormatter.Serialize(writer, ((SetExpressionResponseBody)(object)value!), options); return; }
-        if (typeof(T) == typeof(SetExpressionResponse)) { SetExpressionResponseFormatter.Serialize(writer, ((SetExpressionResponse)(object)value!), options); return; }
-        if (typeof(T) == typeof(StepInTargetsRequest)) { StepInTargetsRequestFormatter.Serialize(writer, ((StepInTargetsRequest)(object)value!), options); return; }
-        if (typeof(T) == typeof(StepInTargetsArguments)) { StepInTargetsArgumentsFormatter.Serialize(writer, ((StepInTargetsArguments)(object)value!), options); return; }
-        if (typeof(T) == typeof(StepInTargetsResponseBody)) { StepInTargetsResponseBodyFormatter.Serialize(writer, ((StepInTargetsResponseBody)(object)value!), options); return; }
-        if (typeof(T) == typeof(StepInTargetsResponse)) { StepInTargetsResponseFormatter.Serialize(writer, ((StepInTargetsResponse)(object)value!), options); return; }
-        if (typeof(T) == typeof(GotoTargetsRequest)) { GotoTargetsRequestFormatter.Serialize(writer, ((GotoTargetsRequest)(object)value!), options); return; }
-        if (typeof(T) == typeof(GotoTargetsArguments)) { GotoTargetsArgumentsFormatter.Serialize(writer, ((GotoTargetsArguments)(object)value!), options); return; }
-        if (typeof(T) == typeof(GotoTargetsResponseBody)) { GotoTargetsResponseBodyFormatter.Serialize(writer, ((GotoTargetsResponseBody)(object)value!), options); return; }
-        if (typeof(T) == typeof(GotoTargetsResponse)) { GotoTargetsResponseFormatter.Serialize(writer, ((GotoTargetsResponse)(object)value!), options); return; }
-        if (typeof(T) == typeof(CompletionsRequest)) { CompletionsRequestFormatter.Serialize(writer, ((CompletionsRequest)(object)value!), options); return; }
-        if (typeof(T) == typeof(CompletionsArguments)) { CompletionsArgumentsFormatter.Serialize(writer, ((CompletionsArguments)(object)value!), options); return; }
-        if (typeof(T) == typeof(CompletionsResponseBody)) { CompletionsResponseBodyFormatter.Serialize(writer, ((CompletionsResponseBody)(object)value!), options); return; }
-        if (typeof(T) == typeof(CompletionsResponse)) { CompletionsResponseFormatter.Serialize(writer, ((CompletionsResponse)(object)value!), options); return; }
-        if (typeof(T) == typeof(ExceptionInfoRequest)) { ExceptionInfoRequestFormatter.Serialize(writer, ((ExceptionInfoRequest)(object)value!), options); return; }
-        if (typeof(T) == typeof(ExceptionInfoArguments)) { ExceptionInfoArgumentsFormatter.Serialize(writer, ((ExceptionInfoArguments)(object)value!), options); return; }
-        if (typeof(T) == typeof(ExceptionInfoResponseBody)) { ExceptionInfoResponseBodyFormatter.Serialize(writer, ((ExceptionInfoResponseBody)(object)value!), options); return; }
-        if (typeof(T) == typeof(ExceptionInfoResponse)) { ExceptionInfoResponseFormatter.Serialize(writer, ((ExceptionInfoResponse)(object)value!), options); return; }
-        if (typeof(T) == typeof(ReadMemoryRequest)) { ReadMemoryRequestFormatter.Serialize(writer, ((ReadMemoryRequest)(object)value!), options); return; }
-        if (typeof(T) == typeof(ReadMemoryArguments)) { ReadMemoryArgumentsFormatter.Serialize(writer, ((ReadMemoryArguments)(object)value!), options); return; }
-        if (typeof(T) == typeof(ReadMemoryResponseBody)) { ReadMemoryResponseBodyFormatter.Serialize(writer, ((ReadMemoryResponseBody)(object)value!), options); return; }
-        if (typeof(T) == typeof(ReadMemoryResponse)) { ReadMemoryResponseFormatter.Serialize(writer, ((ReadMemoryResponse)(object)value!), options); return; }
-        if (typeof(T) == typeof(WriteMemoryRequest)) { WriteMemoryRequestFormatter.Serialize(writer, ((WriteMemoryRequest)(object)value!), options); return; }
-        if (typeof(T) == typeof(WriteMemoryArguments)) { WriteMemoryArgumentsFormatter.Serialize(writer, ((WriteMemoryArguments)(object)value!), options); return; }
-        if (typeof(T) == typeof(WriteMemoryResponseBody)) { WriteMemoryResponseBodyFormatter.Serialize(writer, ((WriteMemoryResponseBody)(object)value!), options); return; }
-        if (typeof(T) == typeof(WriteMemoryResponse)) { WriteMemoryResponseFormatter.Serialize(writer, ((WriteMemoryResponse)(object)value!), options); return; }
-        if (typeof(T) == typeof(DisassembleRequest)) { DisassembleRequestFormatter.Serialize(writer, ((DisassembleRequest)(object)value!), options); return; }
-        if (typeof(T) == typeof(DisassembleArguments)) { DisassembleArgumentsFormatter.Serialize(writer, ((DisassembleArguments)(object)value!), options); return; }
-        if (typeof(T) == typeof(DisassembleResponseBody)) { DisassembleResponseBodyFormatter.Serialize(writer, ((DisassembleResponseBody)(object)value!), options); return; }
-        if (typeof(T) == typeof(DisassembleResponse)) { DisassembleResponseFormatter.Serialize(writer, ((DisassembleResponse)(object)value!), options); return; }
-        if (typeof(T) == typeof(LocationsRequest)) { LocationsRequestFormatter.Serialize(writer, ((LocationsRequest)(object)value!), options); return; }
-        if (typeof(T) == typeof(LocationsArguments)) { LocationsArgumentsFormatter.Serialize(writer, ((LocationsArguments)(object)value!), options); return; }
-        if (typeof(T) == typeof(LocationsResponseBody)) { LocationsResponseBodyFormatter.Serialize(writer, ((LocationsResponseBody)(object)value!), options); return; }
-        if (typeof(T) == typeof(LocationsResponse)) { LocationsResponseFormatter.Serialize(writer, ((LocationsResponse)(object)value!), options); return; }
-        if (typeof(T) == typeof(Capabilities)) { CapabilitiesFormatter.Serialize(writer, ((Capabilities)(object)value!), options); return; }
-        if (typeof(T) == typeof(ExceptionBreakpointsFilter)) { ExceptionBreakpointsFilterFormatter.Serialize(writer, ((ExceptionBreakpointsFilter)(object)value!), options); return; }
-        if (typeof(T) == typeof(Message)) { MessageFormatter.Serialize(writer, ((Message)(object)value!), options); return; }
-        if (typeof(T) == typeof(Module)) { ModuleFormatter.Serialize(writer, ((Module)(object)value!), options); return; }
-        if (typeof(T) == typeof(ColumnDescriptorType)) { ColumnDescriptorTypeFormatter.Serialize(writer, (ColumnDescriptorType)(object)value!, options); return; }
-        if (typeof(T) == typeof(ColumnDescriptor)) { ColumnDescriptorFormatter.Serialize(writer, ((ColumnDescriptor)(object)value!), options); return; }
-        if (typeof(T) == typeof(Thread)) { ThreadFormatter.Serialize(writer, ((Thread)(object)value!), options); return; }
-        if (typeof(T) == typeof(SourcePresentationHint)) { SourcePresentationHintFormatter.Serialize(writer, (SourcePresentationHint)(object)value!, options); return; }
-        if (typeof(T) == typeof(Source)) { SourceFormatter.Serialize(writer, ((Source)(object)value!), options); return; }
-        if (typeof(T) == typeof(StackFramePresentationHint)) { StackFramePresentationHintFormatter.Serialize(writer, (StackFramePresentationHint)(object)value!, options); return; }
-        if (typeof(T) == typeof(StackFrame)) { StackFrameFormatter.Serialize(writer, ((StackFrame)(object)value!), options); return; }
-        if (typeof(T) == typeof(Scope)) { ScopeFormatter.Serialize(writer, ((Scope)(object)value!), options); return; }
-        if (typeof(T) == typeof(Variable)) { VariableFormatter.Serialize(writer, ((Variable)(object)value!), options); return; }
-        if (typeof(T) == typeof(VariablePresentationHint)) { VariablePresentationHintFormatter.Serialize(writer, ((VariablePresentationHint)(object)value!), options); return; }
-        if (typeof(T) == typeof(BreakpointLocation)) { BreakpointLocationFormatter.Serialize(writer, ((BreakpointLocation)(object)value!), options); return; }
-        if (typeof(T) == typeof(SourceBreakpoint)) { SourceBreakpointFormatter.Serialize(writer, ((SourceBreakpoint)(object)value!), options); return; }
-        if (typeof(T) == typeof(FunctionBreakpoint)) { FunctionBreakpointFormatter.Serialize(writer, ((FunctionBreakpoint)(object)value!), options); return; }
-        if (typeof(T) == typeof(DataBreakpointAccessType)) { DataBreakpointAccessTypeFormatter.Serialize(writer, (DataBreakpointAccessType)(object)value!, options); return; }
-        if (typeof(T) == typeof(DataBreakpoint)) { DataBreakpointFormatter.Serialize(writer, ((DataBreakpoint)(object)value!), options); return; }
-        if (typeof(T) == typeof(InstructionBreakpoint)) { InstructionBreakpointFormatter.Serialize(writer, ((InstructionBreakpoint)(object)value!), options); return; }
-        if (typeof(T) == typeof(BreakpointReason)) { BreakpointReasonFormatter.Serialize(writer, (BreakpointReason)(object)value!, options); return; }
-        if (typeof(T) == typeof(Breakpoint)) { BreakpointFormatter.Serialize(writer, ((Breakpoint)(object)value!), options); return; }
-        if (typeof(T) == typeof(SteppingGranularity)) { SteppingGranularityFormatter.Serialize(writer, (SteppingGranularity)(object)value!, options); return; }
-        if (typeof(T) == typeof(StepInTarget)) { StepInTargetFormatter.Serialize(writer, ((StepInTarget)(object)value!), options); return; }
-        if (typeof(T) == typeof(GotoTarget)) { GotoTargetFormatter.Serialize(writer, ((GotoTarget)(object)value!), options); return; }
-        if (typeof(T) == typeof(CompletionItem)) { CompletionItemFormatter.Serialize(writer, ((CompletionItem)(object)value!), options); return; }
-        if (typeof(T) == typeof(CompletionItemType)) { CompletionItemTypeFormatter.Serialize(writer, (CompletionItemType)(object)value!, options); return; }
-        if (typeof(T) == typeof(ChecksumAlgorithm)) { ChecksumAlgorithmFormatter.Serialize(writer, (ChecksumAlgorithm)(object)value!, options); return; }
-        if (typeof(T) == typeof(Checksum)) { ChecksumFormatter.Serialize(writer, ((Checksum)(object)value!), options); return; }
-        if (typeof(T) == typeof(ValueFormat)) { ValueFormatFormatter.Serialize(writer, ((ValueFormat)(object)value!), options); return; }
-        if (typeof(T) == typeof(StackFrameFormat)) { StackFrameFormatFormatter.Serialize(writer, ((StackFrameFormat)(object)value!), options); return; }
-        if (typeof(T) == typeof(ExceptionFilterOptions)) { ExceptionFilterOptionsFormatter.Serialize(writer, ((ExceptionFilterOptions)(object)value!), options); return; }
-        if (typeof(T) == typeof(ExceptionOptions)) { ExceptionOptionsFormatter.Serialize(writer, ((ExceptionOptions)(object)value!), options); return; }
-        if (typeof(T) == typeof(ExceptionBreakMode)) { ExceptionBreakModeFormatter.Serialize(writer, (ExceptionBreakMode)(object)value!, options); return; }
-        if (typeof(T) == typeof(ExceptionPathSegment)) { ExceptionPathSegmentFormatter.Serialize(writer, ((ExceptionPathSegment)(object)value!), options); return; }
-        if (typeof(T) == typeof(ExceptionDetails)) { ExceptionDetailsFormatter.Serialize(writer, ((ExceptionDetails)(object)value!), options); return; }
-        if (typeof(T) == typeof(DisassembledInstructionPresentationHint)) { DisassembledInstructionPresentationHintFormatter.Serialize(writer, (DisassembledInstructionPresentationHint)(object)value!, options); return; }
-        if (typeof(T) == typeof(DisassembledInstruction)) { DisassembledInstructionFormatter.Serialize(writer, ((DisassembledInstruction)(object)value!), options); return; }
-        if (typeof(T) == typeof(BreakpointMode)) { BreakpointModeFormatter.Serialize(writer, ((BreakpointMode)(object)value!), options); return; }
-        throw new global::System.NotSupportedException("No formatter generated for " + typeof(T).FullName);
+        var formatter = Cache<T>.Formatter;
+        if (formatter is null) ThrowNotSupported<T>();
+        formatter!.Serialize(writer, in value, options ?? NoJsonSerializerOptions.Default);
     }
     
     public static byte[] SerializeToUtf8Bytes<T>(T value, NoJsonSerializerOptions? options = null)
     {
         var buffer = new global::System.Buffers.ArrayBufferWriter<byte>(256);
-        Serialize(buffer, value, options);
+        Serialize<T>(buffer, value, options);
         return buffer.WrittenSpan.ToArray();
+    }
+    
+    public static T Deserialize<T>(global::System.IO.Stream stream, NoJsonSerializerOptions? options = null)
+    {
+        var formatter = Cache<T>.Formatter;
+        if (formatter is null) ThrowNotSupported<T>();
+        return formatter!.Deserialize(stream, options ?? NoJsonSerializerOptions.Default);
+    }
+    
+    public static global::System.Threading.Tasks.ValueTask<T> DeserializeAsync<T>(global::System.IO.Stream stream, NoJsonSerializerOptions? options = null, global::System.Threading.CancellationToken cancellationToken = default)
+    {
+        var formatter = Cache<T>.Formatter;
+        if (formatter is null) ThrowNotSupported<T>();
+        return formatter!.DeserializeAsync(stream, options ?? NoJsonSerializerOptions.Default, cancellationToken);
+    }
+    
+    public static void Serialize<T>(global::System.IO.Stream stream, T value, NoJsonSerializerOptions? options = null)
+    {
+        var formatter = Cache<T>.Formatter;
+        if (formatter is null) ThrowNotSupported<T>();
+        formatter!.Serialize(stream, in value, options ?? NoJsonSerializerOptions.Default);
+    }
+    
+    public static global::System.Threading.Tasks.ValueTask SerializeAsync<T>(global::System.IO.Stream stream, T value, NoJsonSerializerOptions? options = null, global::System.Threading.CancellationToken cancellationToken = default)
+    {
+        var formatter = Cache<T>.Formatter;
+        if (formatter is null) ThrowNotSupported<T>();
+        return formatter!.SerializeAsync(stream, value, options ?? NoJsonSerializerOptions.Default, cancellationToken);
+    }
+    
+    [global::System.Diagnostics.CodeAnalysis.DoesNotReturn]
+    [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    static void ThrowNotSupported<T>()
+    {
+        throw new global::System.NotSupportedException("No formatter generated for " + typeof(T).FullName);
     }
 }

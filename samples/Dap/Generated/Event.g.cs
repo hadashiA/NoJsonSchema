@@ -8,7 +8,7 @@ public partial class Event : ProtocolMessage
     /// <summary>
     /// Type of event.
     /// </summary>
-    public string EventValue { get; set; } = default!;
+    public string EventValue { get; set; } = null!;
     
     /// <summary>
     /// Event-specific information.

@@ -11,7 +11,7 @@ public partial class DisassembleArguments
     /// <summary>
     /// Memory reference to the base location containing the instructions to disassemble.
     /// </summary>
-    public string MemoryReference { get; set; } = default!;
+    public string MemoryReference { get; set; } = null!;
     
     /// <summary>
     /// Offset (in bytes) to be applied to the reference location before disassembling. Can be negative.

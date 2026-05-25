@@ -5,5 +5,5 @@ namespace Dap;
 
 public partial class LaunchRequest : Request
 {
-    public new LaunchRequestArguments Arguments { get; set; } = default!;
+    public new LaunchRequestArguments Arguments { get; set; } = null!;
 }

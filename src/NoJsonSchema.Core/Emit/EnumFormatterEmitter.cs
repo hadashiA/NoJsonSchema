@@ -34,7 +34,31 @@ public static class EnumFormatterEmitter
             EmitWriteValue(w, type);
         }
 
+        w.WriteLine();
+        EmitAdapter(w, type.Name);
         return w.ToString();
+    }
+
+    /// <summary>
+    /// Per-enum adapter — sealed singleton implementing <c>INoJsonFormatter&lt;T&gt;</c>, forwarding
+    /// to the static enum Formatter. Plumbed through the namespace-wide <c>Cache&lt;T&gt;</c>.
+    /// </summary>
+    static void EmitAdapter(SourceWriter w, string typeName)
+    {
+        var adapter = typeName + "FormatterAdapter";
+        var formatter = typeName + "Formatter";
+        using (w.Block($"sealed class {NameFactory.EscapeIfReserved(adapter)} : INoJsonFormatter<{typeName}>"))
+        {
+            w.WriteLine($"public static readonly {adapter} Instance = new();");
+            w.WriteLine($"{adapter}() {{ }}");
+            w.WriteLine();
+            w.WriteLine($"public {typeName} Deserialize(global::System.ReadOnlySpan<byte> utf8Json, NoJsonSerializerOptions options) => {formatter}.Deserialize(utf8Json, options);");
+            w.WriteLine($"public void Serialize(global::System.Buffers.IBufferWriter<byte> writer, in {typeName} value, NoJsonSerializerOptions options) => {formatter}.Serialize(writer, value, options);");
+            w.WriteLine($"public {typeName} Deserialize(global::System.IO.Stream stream, NoJsonSerializerOptions options) => {formatter}.Deserialize(stream, options);");
+            w.WriteLine($"public void Serialize(global::System.IO.Stream stream, in {typeName} value, NoJsonSerializerOptions options) => {formatter}.Serialize(stream, value, options);");
+            w.WriteLine($"public global::System.Threading.Tasks.ValueTask<{typeName}> DeserializeAsync(global::System.IO.Stream stream, NoJsonSerializerOptions options, global::System.Threading.CancellationToken cancellationToken) => {formatter}.DeserializeAsync(stream, options, cancellationToken);");
+            w.WriteLine($"public global::System.Threading.Tasks.ValueTask SerializeAsync(global::System.IO.Stream stream, {typeName} value, NoJsonSerializerOptions options, global::System.Threading.CancellationToken cancellationToken) => {formatter}.SerializeAsync(stream, value, options, cancellationToken);");
+        }
     }
 
     static void EmitMemberLiterals(SourceWriter w, EnumTypeDescriptor type)
@@ -54,6 +78,17 @@ public static class EnumFormatterEmitter
         }
         w.WriteLine();
         w.WriteLine($"public static {type.Name} Deserialize(byte[] utf8Json, NoJsonSerializerOptions? options = null) => Deserialize((global::System.ReadOnlySpan<byte>)utf8Json, options);");
+        w.WriteLine();
+        using (w.Block($"public static {type.Name} Deserialize(global::System.IO.Stream stream, NoJsonSerializerOptions? options = null)"))
+        {
+            w.WriteLine("return Deserialize(NoJsonStreamUtility.ReadAllBytes(stream), options);");
+        }
+        w.WriteLine();
+        using (w.Block($"public static async global::System.Threading.Tasks.ValueTask<{type.Name}> DeserializeAsync(global::System.IO.Stream stream, NoJsonSerializerOptions? options = null, global::System.Threading.CancellationToken cancellationToken = default)"))
+        {
+            w.WriteLine("var __bytes = await NoJsonStreamUtility.ReadAllBytesAsync(stream, cancellationToken).ConfigureAwait(false);");
+            w.WriteLine("return Deserialize(__bytes, options);");
+        }
     }
 
     static void EmitReadValue(SourceWriter w, EnumTypeDescriptor type)
@@ -67,10 +102,12 @@ public static class EnumFormatterEmitter
                 {
                     w.WriteLine($"if (__raw.SequenceEqual(Member_{m.Name})) return {type.Name}.{NameFactory.EscapeIfReserved(m.Name)};");
                 }
-                w.WriteLine($"throw new NoJsonFormatException(\"Unknown enum value for {type.Name}: '\" + global::System.Text.Encoding.UTF8.GetString(__raw) + \"'\", tokenizer.Position);");
+                w.WriteLine($"tokenizer.ThrowFormatException(\"Unknown enum value for {type.Name}: '\" + global::System.Text.Encoding.UTF8.GetString(__raw) + \"'\");");
+                w.WriteLine("return default; // unreachable");
             }
             // Escape-bearing fallback. Should be rare; keeps correctness if the value used a \u escape.
-            w.WriteLine($"throw new NoJsonFormatException(\"Unknown enum value for {type.Name} (escaped)\", tokenizer.Position);");
+            w.WriteLine($"tokenizer.ThrowFormatException(\"Unknown enum value for {type.Name} (escaped)\");");
+            w.WriteLine("return default; // unreachable");
         }
     }
 
@@ -88,6 +125,20 @@ public static class EnumFormatterEmitter
             w.WriteLine("var buffer = new global::System.Buffers.ArrayBufferWriter<byte>(16);");
             w.WriteLine("Serialize(buffer, value, options);");
             w.WriteLine("return buffer.WrittenSpan.ToArray();");
+        }
+        w.WriteLine();
+        using (w.Block($"public static void Serialize(global::System.IO.Stream stream, {type.Name} value, NoJsonSerializerOptions? options = null)"))
+        {
+            w.WriteLine("var __buffer = new global::System.Buffers.ArrayBufferWriter<byte>(16);");
+            w.WriteLine("Serialize(__buffer, value, options);");
+            w.WriteLine("stream.Write(__buffer.WrittenSpan);");
+        }
+        w.WriteLine();
+        using (w.Block($"public static async global::System.Threading.Tasks.ValueTask SerializeAsync(global::System.IO.Stream stream, {type.Name} value, NoJsonSerializerOptions? options = null, global::System.Threading.CancellationToken cancellationToken = default)"))
+        {
+            w.WriteLine("var __buffer = new global::System.Buffers.ArrayBufferWriter<byte>(16);");
+            w.WriteLine("Serialize(__buffer, value, options);");
+            w.WriteLine("await stream.WriteAsync(__buffer.WrittenMemory, cancellationToken).ConfigureAwait(false);");
         }
     }
 
