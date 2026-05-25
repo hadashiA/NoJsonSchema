@@ -1,0 +1,677 @@
+namespace NoJsonSchema.Core.Emit;
+
+/// <summary>
+/// Static block of zero-dependency UTF-8 helpers embedded into every generated
+/// <c>{Ns}Serializer.g.cs</c>. Lives in source form so it can be copied verbatim,
+/// and so the user gets exactly one copy regardless of how many types are generated.
+/// </summary>
+/// <remarks>
+/// Internally uses <c>ref byte</c> fields + <c>Unsafe.Add</c> to elide span-bounds checks on the
+/// hot read/write paths. Generated code must target net7.0 (C# 11) or later — ref fields and
+/// <c>Unsafe</c>/<c>MemoryMarshal</c> APIs are required.
+/// </remarks>
+static class SerializerTemplate
+{
+    public const string OptionsTypeName = "NoJsonSerializerOptions";
+    public const string TokenizerTypeName = "Utf8JsonTokenizer";
+    public const string WriterTypeName = "Utf8JsonBufferWriter";
+    public const string FormatExceptionName = "NoJsonFormatException";
+
+    public const string SharedDefinitions = """
+public sealed class NoJsonSerializerOptions
+{
+    public static NoJsonSerializerOptions Default { get; } = new();
+
+    public bool StrictExtraProperties { get; init; }
+    public bool WriteIndented { get; init; }
+    public bool SkipNullProperties { get; init; } = true;
+}
+
+public sealed class NoJsonFormatException : global::System.Exception
+{
+    public NoJsonFormatException(string message, int position) : base(message + " (pos " + position + ")")
+    {
+        Position = position;
+    }
+
+    public int Position { get; }
+}
+
+/// <summary>
+/// Pull-style UTF-8 JSON tokenizer with a Read*/TryRead* only API surface:
+/// the caller (generated formatters) always knows the expected next token from the schema.
+/// </summary>
+ref struct Utf8JsonTokenizer
+{
+    readonly ref byte head;
+    readonly int length;
+    int pos;
+    int valueStart;
+    int valueEnd;
+    bool valueHasEscape;
+
+    public Utf8JsonTokenizer(global::System.ReadOnlySpan<byte> input)
+    {
+        head = ref global::System.Runtime.InteropServices.MemoryMarshal.GetReference(input);
+        length = input.Length;
+        pos = 0;
+        valueStart = 0;
+        valueEnd = 0;
+        valueHasEscape = false;
+    }
+
+    public int Position
+    {
+        [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
+        get => pos;
+    }
+
+    // ----- Structural -----------------------------------------------------------------------
+
+    public void ReadStartObject()
+    {
+        SkipWhitespace();
+        if (pos >= length || ByteAt(pos) != (byte)'{')
+            throw new NoJsonFormatException("Expected '{'", pos);
+        pos++;
+    }
+
+    public void ReadStartArray()
+    {
+        SkipWhitespace();
+        if (pos >= length || ByteAt(pos) != (byte)'[')
+            throw new NoJsonFormatException("Expected '['", pos);
+        pos++;
+    }
+
+    /// <summary>
+    /// Inside an object: read the next property name into <paramref name="nameUtf8"/> and the
+    /// trailing colon, or return false (and consume the closing '}') when the object ends.
+    /// </summary>
+    public bool TryReadPropertyName(out global::System.ReadOnlySpan<byte> nameUtf8)
+    {
+        SkipWhitespace();
+        if (pos >= length) throw new NoJsonFormatException("Unexpected end inside object", pos);
+
+        byte b = ByteAt(pos);
+        if (b == (byte)',')
+        {
+            pos++;
+            SkipWhitespace();
+            if (pos >= length) throw new NoJsonFormatException("Unexpected end after ','", pos);
+            b = ByteAt(pos);
+        }
+
+        if (b == (byte)'}')
+        {
+            pos++;
+            nameUtf8 = default;
+            return false;
+        }
+
+        if (b != (byte)'"')
+            throw new NoJsonFormatException("Expected '\"' for property name, got 0x" + b.ToString("X2"), pos);
+
+        ReadStringValue();
+        nameUtf8 = SliceFrom(valueStart, valueEnd - valueStart);
+
+        SkipWhitespace();
+        if (pos >= length || ByteAt(pos) != (byte)':')
+            throw new NoJsonFormatException("Expected ':' after property name", pos);
+        pos++;
+        return true;
+    }
+
+    /// <summary>
+    /// Inside an array: consume the optional ',' separator. Returns true and consumes the
+    /// closing ']' if the array ended; false when another element follows.
+    /// </summary>
+    public bool TryReadEndArray()
+    {
+        SkipWhitespace();
+        if (pos >= length) throw new NoJsonFormatException("Unexpected end inside array", pos);
+
+        byte b = ByteAt(pos);
+        if (b == (byte)',')
+        {
+            pos++;
+            SkipWhitespace();
+            if (pos >= length) throw new NoJsonFormatException("Unexpected end after ','", pos);
+            b = ByteAt(pos);
+        }
+
+        if (b == (byte)']') { pos++; return true; }
+        return false;
+    }
+
+    // ----- Optional/null --------------------------------------------------------------------
+
+    /// <summary>If the next token is JSON <c>null</c>, advance past it and return true.</summary>
+    public bool TryReadNull()
+    {
+        SkipWhitespace();
+        if (pos + 4 <= length && ByteAt(pos) == (byte)'n'
+            && SliceFrom(pos, 4).SequenceEqual("null"u8))
+        {
+            pos += 4;
+            return true;
+        }
+        return false;
+    }
+
+    // ----- Value readers --------------------------------------------------------------------
+
+    public string ReadString()
+    {
+        SkipWhitespace();
+        if (pos >= length || ByteAt(pos) != (byte)'"')
+            throw new NoJsonFormatException("Expected string", pos);
+        ReadStringValue();
+        var span = SliceFrom(valueStart, valueEnd - valueStart);
+        return valueHasEscape ? DecodeString(span) : global::System.Text.Encoding.UTF8.GetString(span);
+    }
+
+    /// <summary>
+    /// Read a JSON string and return its raw UTF-8 byte slice without allocating a <c>string</c>.
+    /// Returns false if the string contains backslash escapes — callers should then fall back to <see cref="ReadString"/>.
+    /// </summary>
+    public bool TryReadStringRaw(out global::System.ReadOnlySpan<byte> rawBytes)
+    {
+        SkipWhitespace();
+        if (pos >= length || ByteAt(pos) != (byte)'"')
+            throw new NoJsonFormatException("Expected string", pos);
+        ReadStringValue();
+        if (valueHasEscape) { rawBytes = default; return false; }
+        rawBytes = SliceFrom(valueStart, valueEnd - valueStart);
+        return true;
+    }
+
+    public bool ReadBoolean()
+    {
+        SkipWhitespace();
+        if (pos >= length) throw new NoJsonFormatException("Expected boolean", pos);
+        byte b = ByteAt(pos);
+        if (b == (byte)'t')
+        {
+            if (pos + 4 > length || !SliceFrom(pos, 4).SequenceEqual("true"u8))
+                throw new NoJsonFormatException("Expected 'true'", pos);
+            pos += 4;
+            return true;
+        }
+        if (b == (byte)'f')
+        {
+            if (pos + 5 > length || !SliceFrom(pos, 5).SequenceEqual("false"u8))
+                throw new NoJsonFormatException("Expected 'false'", pos);
+            pos += 5;
+            return false;
+        }
+        throw new NoJsonFormatException("Expected boolean, got 0x" + b.ToString("X2"), pos);
+    }
+
+    public int ReadInt32()
+    {
+        ReadNumberValue();
+        if (!global::System.Buffers.Text.Utf8Parser.TryParse(
+                SliceFrom(valueStart, valueEnd - valueStart), out int v, out _))
+            throw new NoJsonFormatException("Invalid int32", pos);
+        return v;
+    }
+
+    public long ReadInt64()
+    {
+        ReadNumberValue();
+        if (!global::System.Buffers.Text.Utf8Parser.TryParse(
+                SliceFrom(valueStart, valueEnd - valueStart), out long v, out _))
+            throw new NoJsonFormatException("Invalid int64", pos);
+        return v;
+    }
+
+    public float ReadSingle()
+    {
+        ReadNumberValue();
+        if (!global::System.Buffers.Text.Utf8Parser.TryParse(
+                SliceFrom(valueStart, valueEnd - valueStart), out float v, out _))
+            throw new NoJsonFormatException("Invalid float", pos);
+        return v;
+    }
+
+    public double ReadDouble()
+    {
+        ReadNumberValue();
+        if (!global::System.Buffers.Text.Utf8Parser.TryParse(
+                SliceFrom(valueStart, valueEnd - valueStart), out double v, out _))
+            throw new NoJsonFormatException("Invalid double", pos);
+        return v;
+    }
+
+    public global::System.DateTimeOffset ReadDateTimeOffset()
+    {
+        var s = ReadString();
+        if (!global::System.DateTimeOffset.TryParse(s, global::System.Globalization.CultureInfo.InvariantCulture, global::System.Globalization.DateTimeStyles.RoundtripKind, out var v))
+            throw new NoJsonFormatException("Invalid date-time '" + s + "'", pos);
+        return v;
+    }
+
+    public global::System.Guid ReadGuid()
+    {
+        var s = ReadString();
+        if (!global::System.Guid.TryParse(s, out var v))
+            throw new NoJsonFormatException("Invalid uuid '" + s + "'", pos);
+        return v;
+    }
+
+    // ----- Skip an unknown value -----------------------------------------------------------
+
+    public void SkipValue()
+    {
+        SkipWhitespace();
+        if (pos >= length) throw new NoJsonFormatException("Unexpected end of input", pos);
+        byte b = ByteAt(pos);
+        switch (b)
+        {
+            case (byte)'"': ReadStringValue(); return;
+            case (byte)'{': SkipObjectOrArray((byte)'{', (byte)'}'); return;
+            case (byte)'[': SkipObjectOrArray((byte)'[', (byte)']'); return;
+            case (byte)'t': ConsumeKeyword("true"u8); return;
+            case (byte)'f': ConsumeKeyword("false"u8); return;
+            case (byte)'n': ConsumeKeyword("null"u8); return;
+            default:
+                if (b == (byte)'-' || (b >= (byte)'0' && b <= (byte)'9')) { ReadNumberValue(); return; }
+                throw new NoJsonFormatException("Unexpected byte 0x" + b.ToString("X2"), pos);
+        }
+    }
+
+    // ----- Internal helpers ----------------------------------------------------------------
+
+    [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
+    byte ByteAt(int offset) => global::System.Runtime.CompilerServices.Unsafe.Add(ref head, offset);
+
+    [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
+    global::System.ReadOnlySpan<byte> SliceFrom(int offset, int len) =>
+        global::System.Runtime.InteropServices.MemoryMarshal.CreateReadOnlySpan(
+            ref global::System.Runtime.CompilerServices.Unsafe.Add(ref head, offset),
+            len);
+
+    [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
+    void SkipWhitespace()
+    {
+        while (pos < length)
+        {
+            byte b = ByteAt(pos);
+            if (b == (byte)' ' || b == (byte)'\t' || b == (byte)'\n' || b == (byte)'\r') pos++;
+            else break;
+        }
+    }
+
+    /// <summary>Consume <c>"..."</c> at <c>pos</c> (opening quote required), recording valueStart/valueEnd.</summary>
+    void ReadStringValue()
+    {
+        pos++; // skip opening quote
+        valueStart = pos;
+        valueHasEscape = false;
+        while (pos < length)
+        {
+            byte b = ByteAt(pos);
+            if (b == (byte)'"')
+            {
+                valueEnd = pos;
+                pos++;
+                return;
+            }
+            if (b == (byte)'\\')
+            {
+                valueHasEscape = true;
+                if (pos + 1 >= length) throw new NoJsonFormatException("Truncated escape", pos);
+                byte next = ByteAt(pos + 1);
+                pos += (next == (byte)'u') ? 6 : 2;
+                continue;
+            }
+            pos++;
+        }
+        throw new NoJsonFormatException("Unterminated string", pos);
+    }
+
+    void ReadNumberValue()
+    {
+        SkipWhitespace();
+        if (pos >= length) throw new NoJsonFormatException("Expected number", pos);
+        byte first = ByteAt(pos);
+        if (first != (byte)'-' && !(first >= (byte)'0' && first <= (byte)'9'))
+            throw new NoJsonFormatException("Expected number, got 0x" + first.ToString("X2"), pos);
+
+        valueStart = pos;
+        if (first == (byte)'-') pos++;
+        while (pos < length && IsNumberByte(ByteAt(pos))) pos++;
+        valueEnd = pos;
+    }
+
+    void ConsumeKeyword(global::System.ReadOnlySpan<byte> keyword)
+    {
+        if (pos + keyword.Length > length || !SliceFrom(pos, keyword.Length).SequenceEqual(keyword))
+            throw new NoJsonFormatException("Expected '" + global::System.Text.Encoding.ASCII.GetString(keyword) + "'", pos);
+        pos += keyword.Length;
+    }
+
+    void SkipObjectOrArray(byte open, byte close)
+    {
+        int depth = 1;
+        pos++; // consume the opening byte
+        while (pos < length && depth > 0)
+        {
+            byte b = ByteAt(pos);
+            if (b == (byte)'"') { ReadStringValue(); continue; }
+            if (b == open) { depth++; pos++; continue; }
+            if (b == close) { depth--; pos++; continue; }
+            pos++;
+        }
+        if (depth != 0) throw new NoJsonFormatException("Unterminated container", pos);
+    }
+
+    static bool IsNumberByte(byte b) =>
+        (b >= (byte)'0' && b <= (byte)'9') || b == (byte)'.' || b == (byte)'-' || b == (byte)'+' || b == (byte)'e' || b == (byte)'E';
+
+    static string DecodeString(global::System.ReadOnlySpan<byte> bytes)
+    {
+        var sb = new global::System.Text.StringBuilder(bytes.Length);
+        int i = 0;
+        while (i < bytes.Length)
+        {
+            byte b = bytes[i];
+            if (b != (byte)'\\') { sb.Append((char)b); i++; continue; }
+
+            if (i + 1 >= bytes.Length) throw new NoJsonFormatException("Truncated escape", i);
+            byte e = bytes[i + 1];
+            switch (e)
+            {
+                case (byte)'"':  sb.Append('"');  i += 2; break;
+                case (byte)'\\': sb.Append('\\'); i += 2; break;
+                case (byte)'/':  sb.Append('/');  i += 2; break;
+                case (byte)'b':  sb.Append('\b'); i += 2; break;
+                case (byte)'f':  sb.Append('\f'); i += 2; break;
+                case (byte)'n':  sb.Append('\n'); i += 2; break;
+                case (byte)'r':  sb.Append('\r'); i += 2; break;
+                case (byte)'t':  sb.Append('\t'); i += 2; break;
+                case (byte)'u':
+                {
+                    if (i + 6 > bytes.Length) throw new NoJsonFormatException("Truncated \\u escape", i);
+                    int cp = HexNibble(bytes[i + 2]) << 12
+                           | HexNibble(bytes[i + 3]) << 8
+                           | HexNibble(bytes[i + 4]) << 4
+                           | HexNibble(bytes[i + 5]);
+                    sb.Append((char)cp);
+                    i += 6;
+                    break;
+                }
+                default: throw new NoJsonFormatException("Unknown escape", i);
+            }
+        }
+        return sb.ToString();
+    }
+
+    static int HexNibble(byte b)
+    {
+        if (b >= (byte)'0' && b <= (byte)'9') return b - (byte)'0';
+        if (b >= (byte)'a' && b <= (byte)'f') return 10 + (b - (byte)'a');
+        if (b >= (byte)'A' && b <= (byte)'F') return 10 + (b - (byte)'A');
+        throw new NoJsonFormatException("Bad hex digit", 0);
+    }
+}
+
+ref struct Utf8JsonBufferWriter
+{
+    readonly global::System.Buffers.IBufferWriter<byte> writer;
+    ref byte spanHead;
+    int spanRemaining;
+    int pending;
+    bool needsSeparator;
+
+    public Utf8JsonBufferWriter(global::System.Buffers.IBufferWriter<byte> writer)
+    {
+        this.writer = writer;
+        spanHead = ref global::System.Runtime.CompilerServices.Unsafe.NullRef<byte>();
+        spanRemaining = 0;
+        pending = 0;
+        needsSeparator = false;
+    }
+
+    public void Flush()
+    {
+        if (pending > 0)
+        {
+            writer.Advance(pending);
+            spanHead = ref global::System.Runtime.CompilerServices.Unsafe.NullRef<byte>();
+            spanRemaining = 0;
+            pending = 0;
+        }
+    }
+
+    public void WriteStartObject() { MaybeSeparator(); WriteByte((byte)'{'); needsSeparator = false; }
+    public void WriteEndObject()   { needsSeparator = false; WriteByte((byte)'}'); needsSeparator = true; }
+    public void WriteStartArray()  { MaybeSeparator(); WriteByte((byte)'['); needsSeparator = false; }
+    public void WriteEndArray()    { needsSeparator = false; WriteByte((byte)']'); needsSeparator = true; }
+
+    [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
+    public void WritePropertyNameRaw(global::System.ReadOnlySpan<byte> nameWithQuotesAndColon)
+    {
+        MaybeSeparator();
+        Append(nameWithQuotesAndColon);
+        needsSeparator = false;
+    }
+
+    /// <summary>
+    /// Writes <paramref name="contentInsideQuotes"/> as a JSON string value. The bytes must be valid UTF-8
+    /// and contain no characters that would require escaping (used for enum members and other fixed literals).
+    /// </summary>
+    public void WriteRawStringValue(scoped global::System.ReadOnlySpan<byte> contentInsideQuotes)
+    {
+        MaybeSeparator();
+        WriteByte((byte)'"');
+        Append(contentInsideQuotes);
+        WriteByte((byte)'"');
+        needsSeparator = true;
+    }
+
+    public void WriteNull()  { MaybeSeparator(); Append("null"u8);  needsSeparator = true; }
+    public void WriteTrue()  { MaybeSeparator(); Append("true"u8);  needsSeparator = true; }
+    public void WriteFalse() { MaybeSeparator(); Append("false"u8); needsSeparator = true; }
+    public void WriteBoolean(bool v) { if (v) WriteTrue(); else WriteFalse(); }
+
+    public void WriteDateTimeOffset(global::System.DateTimeOffset v)
+    {
+        WriteString(v.ToString("O", global::System.Globalization.CultureInfo.InvariantCulture));
+    }
+
+    public void WriteGuid(global::System.Guid v)
+    {
+        WriteString(v.ToString("D", global::System.Globalization.CultureInfo.InvariantCulture));
+    }
+
+    public void WriteInt32(int v)
+    {
+        MaybeSeparator();
+        global::System.Span<byte> tmp = stackalloc byte[16];
+        if (!global::System.Buffers.Text.Utf8Formatter.TryFormat(v, tmp, out int written))
+            throw new global::System.InvalidOperationException("int format");
+        Append(tmp.Slice(0, written));
+        needsSeparator = true;
+    }
+
+    public void WriteInt64(long v)
+    {
+        MaybeSeparator();
+        global::System.Span<byte> tmp = stackalloc byte[24];
+        if (!global::System.Buffers.Text.Utf8Formatter.TryFormat(v, tmp, out int written))
+            throw new global::System.InvalidOperationException("long format");
+        Append(tmp.Slice(0, written));
+        needsSeparator = true;
+    }
+
+    public void WriteSingle(float v)
+    {
+        MaybeSeparator();
+        global::System.Span<byte> tmp = stackalloc byte[32];
+        if (!global::System.Buffers.Text.Utf8Formatter.TryFormat(v, tmp, out int written))
+            throw new global::System.InvalidOperationException("single format");
+        Append(tmp.Slice(0, written));
+        needsSeparator = true;
+    }
+
+    public void WriteDouble(double v)
+    {
+        MaybeSeparator();
+        global::System.Span<byte> tmp = stackalloc byte[32];
+        if (!global::System.Buffers.Text.Utf8Formatter.TryFormat(v, tmp, out int written))
+            throw new global::System.InvalidOperationException("double format");
+        Append(tmp.Slice(0, written));
+        needsSeparator = true;
+    }
+
+    public void WriteString(string value)
+    {
+        MaybeSeparator();
+        WriteByte((byte)'"');
+
+        var chars = value.AsSpan();
+        int safeStart = 0;
+        for (int i = 0; i < chars.Length; i++)
+        {
+            char c = chars[i];
+            if (c >= 0x20 && c < 0x80 && c != '"' && c != '\\') continue;
+
+            if (i > safeStart) AppendAsciiRange(chars.Slice(safeStart, i - safeStart));
+
+            switch (c)
+            {
+                case '"':  Append2((byte)'\\', (byte)'"');  break;
+                case '\\': Append2((byte)'\\', (byte)'\\'); break;
+                case '\b': Append2((byte)'\\', (byte)'b');  break;
+                case '\f': Append2((byte)'\\', (byte)'f');  break;
+                case '\n': Append2((byte)'\\', (byte)'n');  break;
+                case '\r': Append2((byte)'\\', (byte)'r');  break;
+                case '\t': Append2((byte)'\\', (byte)'t');  break;
+                default:
+                    if (c < 0x20)
+                    {
+                        Ensure(6);
+                        global::System.Runtime.CompilerServices.Unsafe.Add(ref spanHead, 0) = (byte)'\\';
+                        global::System.Runtime.CompilerServices.Unsafe.Add(ref spanHead, 1) = (byte)'u';
+                        global::System.Runtime.CompilerServices.Unsafe.Add(ref spanHead, 2) = (byte)'0';
+                        global::System.Runtime.CompilerServices.Unsafe.Add(ref spanHead, 3) = (byte)'0';
+                        global::System.Runtime.CompilerServices.Unsafe.Add(ref spanHead, 4) = HexByte((c >> 4) & 0xF);
+                        global::System.Runtime.CompilerServices.Unsafe.Add(ref spanHead, 5) = HexByte(c & 0xF);
+                        Advance(6);
+                    }
+                    else
+                    {
+                        int cp;
+                        if (char.IsHighSurrogate(c) && i + 1 < chars.Length && char.IsLowSurrogate(chars[i + 1]))
+                        {
+                            cp = char.ConvertToUtf32(c, chars[i + 1]);
+                            i++;
+                        }
+                        else cp = c;
+                        WriteCodePointUtf8(cp);
+                    }
+                    break;
+            }
+            safeStart = i + 1;
+        }
+
+        if (chars.Length > safeStart) AppendAsciiRange(chars.Slice(safeStart));
+
+        WriteByte((byte)'"');
+        needsSeparator = true;
+    }
+
+    [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
+    static byte HexByte(int nibble) => nibble < 10 ? (byte)('0' + nibble) : (byte)('a' + nibble - 10);
+
+    void AppendAsciiRange(scoped global::System.ReadOnlySpan<char> chars)
+    {
+        Ensure(chars.Length);
+        var destSpan = global::System.Runtime.InteropServices.MemoryMarshal.CreateSpan(ref spanHead, chars.Length);
+        int written = global::System.Text.Encoding.UTF8.GetBytes(chars, destSpan);
+        Advance(written);
+    }
+
+    [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
+    void Append2(byte b0, byte b1)
+    {
+        Ensure(2);
+        global::System.Runtime.CompilerServices.Unsafe.Add(ref spanHead, 0) = b0;
+        global::System.Runtime.CompilerServices.Unsafe.Add(ref spanHead, 1) = b1;
+        Advance(2);
+    }
+
+    void WriteCodePointUtf8(int cp)
+    {
+        if (cp < 0x800)
+        {
+            Ensure(2);
+            global::System.Runtime.CompilerServices.Unsafe.Add(ref spanHead, 0) = (byte)(0xC0 | (cp >> 6));
+            global::System.Runtime.CompilerServices.Unsafe.Add(ref spanHead, 1) = (byte)(0x80 | (cp & 0x3F));
+            Advance(2);
+        }
+        else if (cp < 0x10000)
+        {
+            Ensure(3);
+            global::System.Runtime.CompilerServices.Unsafe.Add(ref spanHead, 0) = (byte)(0xE0 | (cp >> 12));
+            global::System.Runtime.CompilerServices.Unsafe.Add(ref spanHead, 1) = (byte)(0x80 | ((cp >> 6) & 0x3F));
+            global::System.Runtime.CompilerServices.Unsafe.Add(ref spanHead, 2) = (byte)(0x80 | (cp & 0x3F));
+            Advance(3);
+        }
+        else
+        {
+            Ensure(4);
+            global::System.Runtime.CompilerServices.Unsafe.Add(ref spanHead, 0) = (byte)(0xF0 | (cp >> 18));
+            global::System.Runtime.CompilerServices.Unsafe.Add(ref spanHead, 1) = (byte)(0x80 | ((cp >> 12) & 0x3F));
+            global::System.Runtime.CompilerServices.Unsafe.Add(ref spanHead, 2) = (byte)(0x80 | ((cp >> 6) & 0x3F));
+            global::System.Runtime.CompilerServices.Unsafe.Add(ref spanHead, 3) = (byte)(0x80 | (cp & 0x3F));
+            Advance(4);
+        }
+    }
+
+    [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
+    void MaybeSeparator()
+    {
+        if (needsSeparator) WriteByte((byte)',');
+    }
+
+    [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
+    void Append(scoped global::System.ReadOnlySpan<byte> data)
+    {
+        Ensure(data.Length);
+        global::System.Runtime.CompilerServices.Unsafe.CopyBlockUnaligned(
+            ref spanHead,
+            ref global::System.Runtime.InteropServices.MemoryMarshal.GetReference(data),
+            (uint)data.Length);
+        Advance(data.Length);
+    }
+
+    [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
+    void WriteByte(byte b)
+    {
+        Ensure(1);
+        spanHead = b;
+        Advance(1);
+    }
+
+    [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
+    void Advance(int n)
+    {
+        spanHead = ref global::System.Runtime.CompilerServices.Unsafe.Add(ref spanHead, n);
+        spanRemaining -= n;
+        pending += n;
+    }
+
+    void Ensure(int needed)
+    {
+        if (spanRemaining >= needed) return;
+        Flush();
+        var newSpan = writer.GetSpan(needed > 256 ? needed : 256);
+        spanHead = ref global::System.Runtime.InteropServices.MemoryMarshal.GetReference(newSpan);
+        spanRemaining = newSpan.Length;
+    }
+}
+""";
+}

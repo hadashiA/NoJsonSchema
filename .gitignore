@@ -1,0 +1,42 @@
+# .NET build outputs
+bin/
+obj/
+out/
+publish/
+artifacts/
+
+# Test results / coverage
+TestResults/
+*.coverage
+*.coveragexml
+coverage.cobertura.xml
+
+# IDE
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+*.userprefs
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# NuGet
+*.nupkg
+*.snupkg
+.nuget/
+packages/
+
+# Rider/ReSharper
+_ReSharper.*/
+*.DotSettings.user
+
+# Logs
+*.log
+
+# Local override
+.env
+.env.local

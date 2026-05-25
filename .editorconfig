@@ -1,0 +1,73 @@
+root = true
+
+[*]
+indent_style = space
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+[*.cs]
+indent_size = 4
+
+# ---------------------------------------------------------------------------------------------
+# Project rule 1: omit redundant accessibility modifiers (default = private/internal).
+# IDE0040 "Add accessibility modifiers" -> we want the OPPOSITE, so set the preference to OMIT.
+# ---------------------------------------------------------------------------------------------
+dotnet_style_require_accessibility_modifiers = omit_if_default:warning
+dotnet_diagnostic.IDE0040.severity = warning
+
+# ---------------------------------------------------------------------------------------------
+# Project rule 2: collection expressions (C# 12) over Array.Empty / new[] / explicit ctors.
+# ---------------------------------------------------------------------------------------------
+dotnet_style_prefer_collection_expression = when_types_loosely_match:warning
+dotnet_diagnostic.IDE0300.severity = warning   # collection literal for arrays
+dotnet_diagnostic.IDE0301.severity = warning   # collection literal for empty
+dotnet_diagnostic.IDE0302.severity = warning   # collection literal for stackalloc
+dotnet_diagnostic.IDE0303.severity = warning   # collection literal for Create()
+dotnet_diagnostic.IDE0304.severity = warning   # collection literal for builder
+dotnet_diagnostic.IDE0305.severity = warning   # collection literal for fluent
+
+# ---------------------------------------------------------------------------------------------
+# Misc style
+# ---------------------------------------------------------------------------------------------
+dotnet_sort_system_directives_first = true
+csharp_using_directive_placement = outside_namespace:warning
+csharp_style_namespace_declarations = file_scoped:warning
+csharp_style_expression_bodied_methods = when_on_single_line:silent
+csharp_prefer_braces = when_multiline:silent
+csharp_new_line_before_open_brace = all
+
+# Naming: PascalCase for static/const fields, camelCase (no underscore) for private/internal instance fields.
+# Underscore prefix is forbidden (rule 3 in CLAUDE.md).
+dotnet_diagnostic.IDE1006.severity = warning
+
+# Static / const fields → PascalCase (covers static readonly, const, public static, etc.)
+dotnet_naming_rule.static_fields_pascal.severity = warning
+dotnet_naming_rule.static_fields_pascal.symbols = static_fields_sym
+dotnet_naming_rule.static_fields_pascal.style = pascal_case_style
+
+dotnet_naming_symbols.static_fields_sym.applicable_kinds = field
+dotnet_naming_symbols.static_fields_sym.applicable_accessibilities = *
+dotnet_naming_symbols.static_fields_sym.required_modifiers = static
+
+dotnet_naming_rule.const_fields_pascal.severity = warning
+dotnet_naming_rule.const_fields_pascal.symbols = const_fields_sym
+dotnet_naming_rule.const_fields_pascal.style = pascal_case_style
+
+dotnet_naming_symbols.const_fields_sym.applicable_kinds = field
+dotnet_naming_symbols.const_fields_sym.applicable_accessibilities = *
+dotnet_naming_symbols.const_fields_sym.required_modifiers = const
+
+# Instance private/internal fields → camelCase, no underscore prefix.
+dotnet_naming_rule.instance_fields_camel.severity = warning
+dotnet_naming_rule.instance_fields_camel.symbols = instance_fields_sym
+dotnet_naming_rule.instance_fields_camel.style = camel_case_no_prefix
+
+dotnet_naming_symbols.instance_fields_sym.applicable_kinds = field
+dotnet_naming_symbols.instance_fields_sym.applicable_accessibilities = private, internal, private_protected
+dotnet_naming_symbols.instance_fields_sym.required_modifiers =
+
+dotnet_naming_style.pascal_case_style.capitalization = pascal_case
+dotnet_naming_style.camel_case_no_prefix.capitalization = camel_case
+dotnet_naming_style.camel_case_no_prefix.required_prefix =
