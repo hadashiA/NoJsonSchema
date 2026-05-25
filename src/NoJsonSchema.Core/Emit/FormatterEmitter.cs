@@ -521,13 +521,24 @@ public static class FormatterEmitter
     static string ReadPrimitiveExpr(TypeRef.Primitive prim) => prim.Kind switch
     {
         PrimitiveKind.String         => "tokenizer.ReadString()",
+        PrimitiveKind.SByte          => "tokenizer.ReadSByte()",
+        PrimitiveKind.Byte           => "tokenizer.ReadByte()",
+        PrimitiveKind.Int16          => "tokenizer.ReadInt16()",
+        PrimitiveKind.UInt16         => "tokenizer.ReadUInt16()",
         PrimitiveKind.Int32          => "tokenizer.ReadInt32()",
+        PrimitiveKind.UInt32         => "tokenizer.ReadUInt32()",
         PrimitiveKind.Int64          => "tokenizer.ReadInt64()",
+        PrimitiveKind.UInt64         => "tokenizer.ReadUInt64()",
         PrimitiveKind.Single         => "tokenizer.ReadSingle()",
         PrimitiveKind.Double         => "tokenizer.ReadDouble()",
         PrimitiveKind.Boolean        => "tokenizer.ReadBoolean()",
         PrimitiveKind.DateTimeOffset => "tokenizer.ReadDateTimeOffset()",
+        PrimitiveKind.DateOnly       => "tokenizer.ReadDateOnly()",
+        PrimitiveKind.TimeOnly       => "tokenizer.ReadTimeOnly()",
+        PrimitiveKind.TimeSpan       => "tokenizer.ReadTimeSpan()",
         PrimitiveKind.Guid           => "tokenizer.ReadGuid()",
+        PrimitiveKind.Uri            => "tokenizer.ReadUri()",
+        PrimitiveKind.ByteArray      => "tokenizer.ReadByteArray()",
         _ => "default",
     };
 
@@ -711,13 +722,24 @@ public static class FormatterEmitter
     static string WritePrimitiveExpr(TypeRef.Primitive prim, string accessor) => prim.Kind switch
     {
         PrimitiveKind.String         => $"w.WriteString({accessor})",
+        PrimitiveKind.SByte          => $"w.WriteSByte({accessor})",
+        PrimitiveKind.Byte           => $"w.WriteByte({accessor})",
+        PrimitiveKind.Int16          => $"w.WriteInt16({accessor})",
+        PrimitiveKind.UInt16         => $"w.WriteUInt16({accessor})",
         PrimitiveKind.Int32          => $"w.WriteInt32({accessor})",
+        PrimitiveKind.UInt32         => $"w.WriteUInt32({accessor})",
         PrimitiveKind.Int64          => $"w.WriteInt64({accessor})",
+        PrimitiveKind.UInt64         => $"w.WriteUInt64({accessor})",
         PrimitiveKind.Single         => $"w.WriteSingle({accessor})",
         PrimitiveKind.Double         => $"w.WriteDouble({accessor})",
         PrimitiveKind.Boolean        => $"w.WriteBoolean({accessor})",
         PrimitiveKind.DateTimeOffset => $"w.WriteDateTimeOffset({accessor})",
+        PrimitiveKind.DateOnly       => $"w.WriteDateOnly({accessor})",
+        PrimitiveKind.TimeOnly       => $"w.WriteTimeOnly({accessor})",
+        PrimitiveKind.TimeSpan       => $"w.WriteTimeSpan({accessor})",
         PrimitiveKind.Guid           => $"w.WriteGuid({accessor})",
+        PrimitiveKind.Uri            => $"w.WriteUri({accessor})",
+        PrimitiveKind.ByteArray      => $"w.WriteByteArray({accessor})",
         _ => "w.WriteNull()",
     };
 

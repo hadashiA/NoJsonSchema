@@ -284,6 +284,42 @@ ref struct Utf8JsonTokenizer
         return false; // unreachable — the C# flow analyser doesn't honour [DoesNotReturn] for CS0161.
     }
 
+    public sbyte ReadSByte()
+    {
+        ReadNumberValue();
+        if (!global::System.Buffers.Text.Utf8Parser.TryParse(
+                SliceFrom(valueStart, valueEnd - valueStart), out sbyte v, out _))
+            ThrowFormatException("Invalid int8");
+        return v;
+    }
+
+    public byte ReadByte()
+    {
+        ReadNumberValue();
+        if (!global::System.Buffers.Text.Utf8Parser.TryParse(
+                SliceFrom(valueStart, valueEnd - valueStart), out byte v, out _))
+            ThrowFormatException("Invalid uint8");
+        return v;
+    }
+
+    public short ReadInt16()
+    {
+        ReadNumberValue();
+        if (!global::System.Buffers.Text.Utf8Parser.TryParse(
+                SliceFrom(valueStart, valueEnd - valueStart), out short v, out _))
+            ThrowFormatException("Invalid int16");
+        return v;
+    }
+
+    public ushort ReadUInt16()
+    {
+        ReadNumberValue();
+        if (!global::System.Buffers.Text.Utf8Parser.TryParse(
+                SliceFrom(valueStart, valueEnd - valueStart), out ushort v, out _))
+            ThrowFormatException("Invalid uint16");
+        return v;
+    }
+
     public int ReadInt32()
     {
         ReadNumberValue();
@@ -293,12 +329,30 @@ ref struct Utf8JsonTokenizer
         return v;
     }
 
+    public uint ReadUInt32()
+    {
+        ReadNumberValue();
+        if (!global::System.Buffers.Text.Utf8Parser.TryParse(
+                SliceFrom(valueStart, valueEnd - valueStart), out uint v, out _))
+            ThrowFormatException("Invalid uint32");
+        return v;
+    }
+
     public long ReadInt64()
     {
         ReadNumberValue();
         if (!global::System.Buffers.Text.Utf8Parser.TryParse(
                 SliceFrom(valueStart, valueEnd - valueStart), out long v, out _))
             ThrowFormatException("Invalid int64");
+        return v;
+    }
+
+    public ulong ReadUInt64()
+    {
+        ReadNumberValue();
+        if (!global::System.Buffers.Text.Utf8Parser.TryParse(
+                SliceFrom(valueStart, valueEnd - valueStart), out ulong v, out _))
+            ThrowFormatException("Invalid uint64");
         return v;
     }
 
@@ -334,6 +388,45 @@ ref struct Utf8JsonTokenizer
         if (!global::System.Guid.TryParse(s, out var v))
             ThrowFormatException("Invalid uuid '" + s + "'");
         return v;
+    }
+
+    public global::System.DateOnly ReadDateOnly()
+    {
+        var s = ReadString();
+        if (!global::System.DateOnly.TryParse(s, global::System.Globalization.CultureInfo.InvariantCulture, global::System.Globalization.DateTimeStyles.None, out var v))
+            ThrowFormatException("Invalid date '" + s + "'");
+        return v;
+    }
+
+    public global::System.TimeOnly ReadTimeOnly()
+    {
+        var s = ReadString();
+        if (!global::System.TimeOnly.TryParse(s, global::System.Globalization.CultureInfo.InvariantCulture, global::System.Globalization.DateTimeStyles.None, out var v))
+            ThrowFormatException("Invalid time '" + s + "'");
+        return v;
+    }
+
+    public global::System.TimeSpan ReadTimeSpan()
+    {
+        var s = ReadString();
+        // ISO 8601 duration ("PT1H30M") via XmlConvert — JSON Schema's `format: duration` mandates ISO 8601.
+        try { return global::System.Xml.XmlConvert.ToTimeSpan(s); }
+        catch (global::System.FormatException) { ThrowFormatException("Invalid duration '" + s + "'"); return default; }
+    }
+
+    public global::System.Uri ReadUri()
+    {
+        var s = ReadString();
+        if (!global::System.Uri.TryCreate(s, global::System.UriKind.RelativeOrAbsolute, out var v))
+            ThrowFormatException("Invalid uri '" + s + "'");
+        return v;
+    }
+
+    public byte[] ReadByteArray()
+    {
+        var s = ReadString();
+        try { return global::System.Convert.FromBase64String(s); }
+        catch (global::System.FormatException) { ThrowFormatException("Invalid base64"); return []; }
     }
 
     // ----- Discriminator peek (polymorphic dispatch) ---------------------------------------
@@ -648,10 +741,10 @@ ref struct Utf8JsonBufferWriter
         }
     }
 
-    public void WriteStartObject() { MaybeSeparator(); WriteByte((byte)'{'); needsSeparator = false; }
-    public void WriteEndObject()   { needsSeparator = false; WriteByte((byte)'}'); needsSeparator = true; }
-    public void WriteStartArray()  { MaybeSeparator(); WriteByte((byte)'['); needsSeparator = false; }
-    public void WriteEndArray()    { needsSeparator = false; WriteByte((byte)']'); needsSeparator = true; }
+    public void WriteStartObject() { MaybeSeparator(); AppendByte((byte)'{'); needsSeparator = false; }
+    public void WriteEndObject()   { needsSeparator = false; AppendByte((byte)'}'); needsSeparator = true; }
+    public void WriteStartArray()  { MaybeSeparator(); AppendByte((byte)'['); needsSeparator = false; }
+    public void WriteEndArray()    { needsSeparator = false; AppendByte((byte)']'); needsSeparator = true; }
 
     [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
     public void WritePropertyNameRaw(global::System.ReadOnlySpan<byte> nameWithQuotesAndColon)
@@ -668,9 +761,9 @@ ref struct Utf8JsonBufferWriter
     public void WriteRawStringValue(scoped global::System.ReadOnlySpan<byte> contentInsideQuotes)
     {
         MaybeSeparator();
-        WriteByte((byte)'"');
+        AppendByte((byte)'"');
         Append(contentInsideQuotes);
-        WriteByte((byte)'"');
+        AppendByte((byte)'"');
         needsSeparator = true;
     }
 
@@ -689,6 +782,72 @@ ref struct Utf8JsonBufferWriter
         WriteString(v.ToString("D", global::System.Globalization.CultureInfo.InvariantCulture));
     }
 
+    public void WriteDateOnly(global::System.DateOnly v)
+    {
+        WriteString(v.ToString("yyyy-MM-dd", global::System.Globalization.CultureInfo.InvariantCulture));
+    }
+
+    public void WriteTimeOnly(global::System.TimeOnly v)
+    {
+        WriteString(v.ToString("O", global::System.Globalization.CultureInfo.InvariantCulture));
+    }
+
+    public void WriteTimeSpan(global::System.TimeSpan v)
+    {
+        // Emit ISO 8601 duration (`P…T…`) so it round-trips through `format: duration` consumers.
+        WriteString(global::System.Xml.XmlConvert.ToString(v));
+    }
+
+    public void WriteUri(global::System.Uri v)
+    {
+        WriteString(v.ToString());
+    }
+
+    public void WriteByteArray(byte[] v)
+    {
+        WriteString(global::System.Convert.ToBase64String(v));
+    }
+
+    public void WriteSByte(sbyte v)
+    {
+        MaybeSeparator();
+        global::System.Span<byte> tmp = stackalloc byte[8];
+        if (!global::System.Buffers.Text.Utf8Formatter.TryFormat(v, tmp, out int written))
+            throw new global::System.InvalidOperationException("sbyte format");
+        Append(tmp.Slice(0, written));
+        needsSeparator = true;
+    }
+
+    public void WriteByte(byte v)
+    {
+        MaybeSeparator();
+        global::System.Span<byte> tmp = stackalloc byte[8];
+        if (!global::System.Buffers.Text.Utf8Formatter.TryFormat(v, tmp, out int written))
+            throw new global::System.InvalidOperationException("byte format");
+        Append(tmp.Slice(0, written));
+        needsSeparator = true;
+    }
+
+    public void WriteInt16(short v)
+    {
+        MaybeSeparator();
+        global::System.Span<byte> tmp = stackalloc byte[8];
+        if (!global::System.Buffers.Text.Utf8Formatter.TryFormat(v, tmp, out int written))
+            throw new global::System.InvalidOperationException("short format");
+        Append(tmp.Slice(0, written));
+        needsSeparator = true;
+    }
+
+    public void WriteUInt16(ushort v)
+    {
+        MaybeSeparator();
+        global::System.Span<byte> tmp = stackalloc byte[8];
+        if (!global::System.Buffers.Text.Utf8Formatter.TryFormat(v, tmp, out int written))
+            throw new global::System.InvalidOperationException("ushort format");
+        Append(tmp.Slice(0, written));
+        needsSeparator = true;
+    }
+
     public void WriteInt32(int v)
     {
         MaybeSeparator();
@@ -699,12 +858,32 @@ ref struct Utf8JsonBufferWriter
         needsSeparator = true;
     }
 
+    public void WriteUInt32(uint v)
+    {
+        MaybeSeparator();
+        global::System.Span<byte> tmp = stackalloc byte[16];
+        if (!global::System.Buffers.Text.Utf8Formatter.TryFormat(v, tmp, out int written))
+            throw new global::System.InvalidOperationException("uint format");
+        Append(tmp.Slice(0, written));
+        needsSeparator = true;
+    }
+
     public void WriteInt64(long v)
     {
         MaybeSeparator();
         global::System.Span<byte> tmp = stackalloc byte[24];
         if (!global::System.Buffers.Text.Utf8Formatter.TryFormat(v, tmp, out int written))
             throw new global::System.InvalidOperationException("long format");
+        Append(tmp.Slice(0, written));
+        needsSeparator = true;
+    }
+
+    public void WriteUInt64(ulong v)
+    {
+        MaybeSeparator();
+        global::System.Span<byte> tmp = stackalloc byte[24];
+        if (!global::System.Buffers.Text.Utf8Formatter.TryFormat(v, tmp, out int written))
+            throw new global::System.InvalidOperationException("ulong format");
         Append(tmp.Slice(0, written));
         needsSeparator = true;
     }
@@ -732,7 +911,7 @@ ref struct Utf8JsonBufferWriter
     public void WriteString(string value)
     {
         MaybeSeparator();
-        WriteByte((byte)'"');
+        AppendByte((byte)'"');
 
         var chars = value.AsSpan();
         int safeStart = 0;
@@ -782,7 +961,7 @@ ref struct Utf8JsonBufferWriter
 
         if (chars.Length > safeStart) AppendAsciiRange(chars.Slice(safeStart));
 
-        WriteByte((byte)'"');
+        AppendByte((byte)'"');
         needsSeparator = true;
     }
 
@@ -837,7 +1016,7 @@ ref struct Utf8JsonBufferWriter
     [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
     void MaybeSeparator()
     {
-        if (needsSeparator) WriteByte((byte)',');
+        if (needsSeparator) AppendByte((byte)',');
     }
 
     [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
@@ -852,7 +1031,7 @@ ref struct Utf8JsonBufferWriter
     }
 
     [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
-    void WriteByte(byte b)
+    void AppendByte(byte b)
     {
         Ensure(1);
         spanHead = b;

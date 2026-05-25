@@ -1,0 +1,25 @@
+name: Test
+
+on:
+  push:
+    branches:
+    - "main"
+  pull_request:
+    branches:
+    - "main"
+
+jobs:
+  test-dotnet:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      TZ: Asia/Tokyo
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          # .NET 9 SDK reads .slnx. Library targets stay net8.0 / netstandard2.0|2.1 (SDK ≠ TFM).
+          dotnet-version: |
+            9.0.x
+      - run: dotnet build -c Debug
+      - run: dotnet test -c Debug --no-build

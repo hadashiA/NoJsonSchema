@@ -1,0 +1,22 @@
+<Solution>
+  <Configurations>
+    <Platform Name="Any CPU" />
+    <Platform Name="x64" />
+    <Platform Name="x86" />
+  </Configurations>
+  <Folder Name="/samples/">
+    <Project Path="samples/Dap/Dap.csproj" />
+  </Folder>
+  <Folder Name="/src/">
+    <Project Path="src/NoJsonSchema.Cli/NoJsonSchema.Cli.csproj" />
+    <Project Path="src/NoJsonSchema.Core/NoJsonSchema.Core.csproj" />
+    <Project Path="src/NoJsonSchema.SourceGenerator/NoJsonSchema.SourceGenerator.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/NoJsonSchema.Core.Tests/NoJsonSchema.Core.Tests.csproj" />
+    <Project Path="tests/NoJsonSchema.DapIntegration.Tests/NoJsonSchema.DapIntegration.Tests.csproj" />
+    <Project Path="tests/NoJsonSchema.Roundtrip.Tests/NoJsonSchema.Roundtrip.Tests.csproj" />
+    <Project Path="tests/NoJsonSchema.Snapshot.Tests/NoJsonSchema.Snapshot.Tests.csproj" />
+    <Project Path="tests/NoJsonSchema.SourceGenerator.Tests/NoJsonSchema.SourceGenerator.Tests.csproj" />
+  </Folder>
+</Solution>

@@ -675,15 +675,30 @@ public sealed class TypeGraphBuilder
 
     static TypeRef MapStringPrimitive(SchemaNode schema) => schema.Format switch
     {
-        "date-time" => TypeRef.PrimitiveDateTimeOffset,
-        "uuid"      => TypeRef.PrimitiveGuid,
-        _           => TypeRef.PrimitiveString,
+        "date-time"              => TypeRef.PrimitiveDateTimeOffset,
+        "date"                   => TypeRef.PrimitiveDateOnly,
+        "time"                   => TypeRef.PrimitiveTimeOnly,
+        "duration"               => TypeRef.PrimitiveTimeSpan,
+        "uuid"                   => TypeRef.PrimitiveGuid,
+        "uri" or "uri-reference" => TypeRef.PrimitiveUri,
+        // OpenAPI: a string + byte/binary is a base64-encoded byte array (or raw binary, which in
+        // JSON is still base64 in practice).
+        "byte" or "binary"       => TypeRef.PrimitiveByteArray,
+        _                        => TypeRef.PrimitiveString,
     };
 
     static TypeRef MapIntegerPrimitive(SchemaNode schema) => schema.Format switch
     {
-        "int32" or "int16" or "byte" => TypeRef.PrimitiveInt32,
-        _ => TypeRef.PrimitiveInt64,
+        "int8"            => TypeRef.PrimitiveSByte,
+        // OpenAPI's `byte`/`uint8` integer format is uint8 — distinct from `string + format:byte`
+        // (base64), which is resolved separately in MapStringPrimitive.
+        "uint8" or "byte" => TypeRef.PrimitiveByte,
+        "int16"           => TypeRef.PrimitiveInt16,
+        "uint16"          => TypeRef.PrimitiveUInt16,
+        "int32"           => TypeRef.PrimitiveInt32,
+        "uint32"          => TypeRef.PrimitiveUInt32,
+        "uint64"          => TypeRef.PrimitiveUInt64,
+        _                 => TypeRef.PrimitiveInt64,
     };
 
     static TypeRef MapNumberPrimitive(SchemaNode schema) => schema.Format switch

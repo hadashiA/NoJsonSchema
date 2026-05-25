@@ -15,15 +15,16 @@
          can use C# 11 features but nothing that would prevent loading on Roslyn 4.3. -->
     <LangVersion>11</LangVersion>
 
-    <Description>Roslyn incremental source generator for NoJsonSchema. Drop a JSON Schema as AdditionalFiles and get types + UTF-8 parser/emitter at build time.</Description>
-    <PackageTags>json;schema;codegen;source-generator;roslyn;unity</PackageTags>
+    <Title>NoJsonSchema Source Generator</Title>
+    <Description>Roslyn incremental source generator for NoJsonSchema. Drop a JSON Schema (or OpenAPI 3.x) as `AdditionalFiles` and get C# types + zero-dependency UTF-8 JSON parser/emitter at build time. AOT / IL2CPP friendly; loadable by the .NET SDK and Unity 2022.3+ Roslyn.</Description>
+    <PackageTags>json;schema;codegen;source-generator;roslyn;unity;openapi;aot</PackageTags>
   </PropertyGroup>
 
   <ItemGroup>
     <!-- Reference Microsoft.CodeAnalysis at the Unity-compatible version. Marked PrivateAssets so
          consumers don't transitively pick up our copy. -->
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp"
-                      VersionOverride="$(RoslynVersionForUnity)"
+                      Version="$(RoslynVersionForUnity)"
                       PrivateAssets="all" />
   </ItemGroup>
 
@@ -42,7 +43,7 @@
           Pack="true"
           PackagePath="analyzers/dotnet/cs"
           Visible="false" />
-    <None Include="$(OutputPath)\NoJsonSchema.Core.dll"
+    <None Include="$(OutputPath)\NoJsonSchema.dll"
           Pack="true"
           PackagePath="analyzers/dotnet/cs"
           Visible="false" />

@@ -35,13 +35,24 @@ public abstract record TypeRef
 
     // Convenience constants.
     public static readonly Primitive PrimitiveString         = new(PrimitiveKind.String);
+    public static readonly Primitive PrimitiveSByte          = new(PrimitiveKind.SByte);
+    public static readonly Primitive PrimitiveByte           = new(PrimitiveKind.Byte);
+    public static readonly Primitive PrimitiveInt16          = new(PrimitiveKind.Int16);
+    public static readonly Primitive PrimitiveUInt16         = new(PrimitiveKind.UInt16);
     public static readonly Primitive PrimitiveInt32          = new(PrimitiveKind.Int32);
+    public static readonly Primitive PrimitiveUInt32         = new(PrimitiveKind.UInt32);
     public static readonly Primitive PrimitiveInt64          = new(PrimitiveKind.Int64);
+    public static readonly Primitive PrimitiveUInt64         = new(PrimitiveKind.UInt64);
     public static readonly Primitive PrimitiveSingle         = new(PrimitiveKind.Single);
     public static readonly Primitive PrimitiveDouble         = new(PrimitiveKind.Double);
     public static readonly Primitive PrimitiveBoolean        = new(PrimitiveKind.Boolean);
     public static readonly Primitive PrimitiveDateTimeOffset = new(PrimitiveKind.DateTimeOffset);
+    public static readonly Primitive PrimitiveDateOnly       = new(PrimitiveKind.DateOnly);
+    public static readonly Primitive PrimitiveTimeOnly       = new(PrimitiveKind.TimeOnly);
+    public static readonly Primitive PrimitiveTimeSpan       = new(PrimitiveKind.TimeSpan);
     public static readonly Primitive PrimitiveGuid           = new(PrimitiveKind.Guid);
+    public static readonly Primitive PrimitiveUri            = new(PrimitiveKind.Uri);
+    public static readonly Primitive PrimitiveByteArray      = new(PrimitiveKind.ByteArray);
 
     /// <summary>Wraps <paramref name="inner"/> in a <see cref="Nullable"/> unless it already is one.</summary>
     public static TypeRef MakeNullable(TypeRef inner) => inner is Nullable ? inner : new Nullable(inner);

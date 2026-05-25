@@ -3,12 +3,20 @@
   <PropertyGroup>
     <TargetFrameworks>net8.0;netstandard2.1;netstandard2.0</TargetFrameworks>
     <IsPackable>true</IsPackable>
-    <Description>JSON Schema → C# types + zero-dependency UTF-8 JSON parser/emitter generator.</Description>
-    <PackageTags>json;schema;codegen;source-generator;utf8</PackageTags>
+
+    <!-- Project folder/csproj keep the ".Core" suffix as an internal organisation marker,
+         but the public NuGet identity drops it. AssemblyName cascades into PackageId by default. -->
+    <AssemblyName>NoJsonSchema</AssemblyName>
+    <PackageId>NoJsonSchema</PackageId>
+    <RootNamespace>NoJsonSchema.Core</RootNamespace>
+
+    <Title>NoJsonSchema</Title>
+    <Description>Generate C# types and a zero-dependency UTF-8 JSON parser/emitter from JSON Schema (Draft 2020-12 / Draft-07 / OpenAPI 3.x). Use either the standalone CLI (`nojsonschema`) or the Roslyn source generator (`NoJsonSchema.SourceGenerator`). The generated code is BCL-only — no System.Text.Json, no reflection — and AOT / IL2CPP friendly.</Description>
+    <PackageTags>json;schema;codegen;serializer;utf8;aot;source-generator;openapi</PackageTags>
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="System.Text.Json" />
+    <PackageReference Include="System.Text.Json" Version="8.0.5" />
   </ItemGroup>
 
 </Project>

@@ -29,20 +29,35 @@ public static class TypeExpression
     public static string RenderPrimitive(PrimitiveKind kind) => kind switch
     {
         PrimitiveKind.String         => "string",
+        PrimitiveKind.SByte          => "sbyte",
+        PrimitiveKind.Byte           => "byte",
+        PrimitiveKind.Int16          => "short",
+        PrimitiveKind.UInt16         => "ushort",
         PrimitiveKind.Int32          => "int",
+        PrimitiveKind.UInt32         => "uint",
         PrimitiveKind.Int64          => "long",
+        PrimitiveKind.UInt64         => "ulong",
         PrimitiveKind.Single         => "float",
         PrimitiveKind.Double         => "double",
         PrimitiveKind.Boolean        => "bool",
         PrimitiveKind.DateTimeOffset => "global::System.DateTimeOffset",
+        PrimitiveKind.DateOnly       => "global::System.DateOnly",
+        PrimitiveKind.TimeOnly       => "global::System.TimeOnly",
+        PrimitiveKind.TimeSpan       => "global::System.TimeSpan",
         PrimitiveKind.Guid           => "global::System.Guid",
+        PrimitiveKind.Uri            => "global::System.Uri",
+        PrimitiveKind.ByteArray      => "byte[]",
         _ => throw new InvalidOperationException($"Unhandled PrimitiveKind: {kind}"),
     };
 
     /// <summary>True when the type is a CLR value type (no reference identity, can't be null without ?).</summary>
     public static bool IsValueType(TypeRef type) => type switch
     {
-        TypeRef.Primitive p => p.Kind != PrimitiveKind.String,
+        // String, Uri, ByteArray are reference types; everything else in PrimitiveKind is a struct.
+        TypeRef.Primitive p =>
+            p.Kind != PrimitiveKind.String
+            && p.Kind != PrimitiveKind.Uri
+            && p.Kind != PrimitiveKind.ByteArray,
         TypeRef.Nullable nu => IsValueType(nu.Inner),
         _ => false,
     };

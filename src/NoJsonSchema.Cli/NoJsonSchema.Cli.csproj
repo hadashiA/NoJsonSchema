@@ -4,13 +4,17 @@
     <OutputType>Exe</OutputType>
     <TargetFramework>net8.0</TargetFramework>
 
+    <!-- dotnet-tool packaging: `dotnet tool install -g NoJsonSchema.Cli` installs this; the shell
+         entry point is `nojsonschema` via ToolCommandName. Package ID matches the project name
+         (lowercase `nojsonschema` would collide with the case-insensitive `NoJsonSchema` lib). -->
     <PackAsTool>true</PackAsTool>
     <ToolCommandName>nojsonschema</ToolCommandName>
+    <PackageId>NoJsonSchema.Cli</PackageId>
     <IsPackable>true</IsPackable>
     <RootNamespace>NoJsonSchema.Cli</RootNamespace>
-    <AssemblyName>nojsonschema</AssemblyName>
-    <Description>CLI for the NoJsonSchema code generator.</Description>
-    <PackageTags>json;schema;codegen;dotnet-tool</PackageTags>
+    <Title>NoJsonSchema CLI</Title>
+    <Description>Command-line tool that turns JSON Schema (Draft 2020-12 / Draft-07 / OpenAPI 3.x) into zero-dependency C# types and a UTF-8 JSON parser/emitter. Supports remote schema URLs, type whitelisting, value-object record structs, and stream APIs.</Description>
+    <PackageTags>json;schema;codegen;dotnet-tool;openapi;cli</PackageTags>
 
     <!-- ConsoleAppFramework's source generator reads XML doc comments for help / short aliases. -->
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
@@ -21,7 +25,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="ConsoleAppFramework">
+    <PackageReference Include="ConsoleAppFramework" Version="5.7.13">
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
