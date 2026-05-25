@@ -10,6 +10,15 @@ public static class TypeEmitter
 {
     public static string Emit(ObjectTypeDescriptor type, GenerationOptions options)
     {
+        if (type.Style == TypeStyle.ReadonlyRecordStruct)
+        {
+            return EmitRecordStruct(type, options);
+        }
+        return EmitClassOrRecord(type, options);
+    }
+
+    static string EmitClassOrRecord(ObjectTypeDescriptor type, GenerationOptions options)
+    {
         var w = new SourceWriter();
         WriteFileHeader(w);
         w.WriteLine($"namespace {options.Namespace};");
@@ -31,6 +40,64 @@ public static class TypeEmitter
         }
 
         return w.ToString();
+    }
+
+    /// <summary>
+    /// Emit a value-object style declaration: <c>public readonly partial record struct T(P1 X, P2 Y);</c>.
+    /// Required + non-null parameters come first; everything else is given a default so callers can
+    /// construct it with positional args even when the schema marks a field optional.
+    /// </summary>
+    static string EmitRecordStruct(ObjectTypeDescriptor type, GenerationOptions options)
+    {
+        var w = new SourceWriter();
+        WriteFileHeader(w);
+        w.WriteLine($"namespace {options.Namespace};");
+        w.WriteLine();
+
+        EmitXmlDoc(w, type.Description);
+
+        var ordered = type.Properties
+            .Select(p => (Prop: p, Required: p.IsRequired && !p.IsNullable))
+            .OrderByDescending(x => x.Required)
+            .ToList();
+
+        foreach (var (p, _) in ordered)
+        {
+            if (string.IsNullOrEmpty(p.Description)) continue;
+            var lines = p.Description!.Split('\n');
+            foreach (var line in lines)
+            {
+                w.WriteLine("/// <param name=\"" + NameFactory.EscapeIfReserved(p.Name) + "\">"
+                    + System.Net.WebUtility.HtmlEncode(line.TrimEnd('\r')) + "</param>");
+            }
+        }
+
+        var parts = new List<string>(ordered.Count);
+        foreach (var (p, isRequired) in ordered)
+        {
+            var typeExpr = RenderPropertyType(p);
+            var paramName = NameFactory.EscapeIfReserved(p.Name);
+            var paramDecl = $"{typeExpr} {paramName}";
+            if (!isRequired)
+            {
+                paramDecl += " = " + DefaultLiteral(p);
+            }
+            parts.Add(paramDecl);
+        }
+
+        var paramList = string.Join(", ", parts);
+        w.WriteLine($"public readonly partial record struct {NameFactory.EscapeIfReserved(type.Name)}({paramList});");
+        return w.ToString();
+    }
+
+    static string DefaultLiteral(PropertyDescriptor p)
+    {
+        // Nullable annotation already appended in RenderPropertyType for optional/nullable values.
+        if (p.IsNullable || !p.IsRequired)
+        {
+            return TypeExpression.IsValueType(p.Type) ? "default" : "null";
+        }
+        return "default";
     }
 
     internal static void WriteFileHeader(SourceWriter w)

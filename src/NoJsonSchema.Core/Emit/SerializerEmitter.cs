@@ -41,9 +41,21 @@ public static class SerializerEmitter
         using (w.Block("public static T Deserialize<T>(global::System.ReadOnlySpan<byte> utf8Json, NoJsonSerializerOptions? options = null)"))
         {
             w.WriteLine("options ??= NoJsonSerializerOptions.Default;");
-            foreach (var name in EmittableTypeNames(graph))
+            foreach (var kv in graph.Types)
             {
-                w.WriteLine($"if (typeof(T) == typeof({name})) return (T)(object){name}Formatter.Deserialize(utf8Json, options)!;");
+                if (kv.Value is ObjectTypeDescriptor { Style: TypeStyle.ReadonlyRecordStruct })
+                {
+                    // Unsafe.As avoids boxing the struct when going through the generic entry point.
+                    using (w.Block($"if (typeof(T) == typeof({kv.Key}))"))
+                    {
+                        w.WriteLine($"var v = {kv.Key}Formatter.Deserialize(utf8Json, options);");
+                        w.WriteLine($"return global::System.Runtime.CompilerServices.Unsafe.As<{kv.Key}, T>(ref v);");
+                    }
+                }
+                else if (kv.Value is ObjectTypeDescriptor or EnumTypeDescriptor)
+                {
+                    w.WriteLine($"if (typeof(T) == typeof({kv.Key})) return (T)(object){kv.Key}Formatter.Deserialize(utf8Json, options)!;");
+                }
             }
             w.WriteLine("throw new global::System.NotSupportedException(\"No formatter generated for \" + typeof(T).FullName);");
         }
@@ -59,7 +71,16 @@ public static class SerializerEmitter
             w.WriteLine("options ??= NoJsonSerializerOptions.Default;");
             foreach (var kv in graph.Types)
             {
-                if (kv.Value is ObjectTypeDescriptor)
+                if (kv.Value is ObjectTypeDescriptor { Style: TypeStyle.ReadonlyRecordStruct })
+                {
+                    // Reinterpret the generic parameter as the concrete struct ref so we can pass it 'in'.
+                    using (w.Block($"if (typeof(T) == typeof({kv.Key}))"))
+                    {
+                        w.WriteLine($"{kv.Key}Formatter.Serialize(writer, in global::System.Runtime.CompilerServices.Unsafe.As<T, {kv.Key}>(ref value), options);");
+                        w.WriteLine("return;");
+                    }
+                }
+                else if (kv.Value is ObjectTypeDescriptor)
                 {
                     w.WriteLine($"if (typeof(T) == typeof({kv.Key})) {{ {kv.Key}Formatter.Serialize(writer, (({kv.Key})(object)value!), options); return; }}");
                 }

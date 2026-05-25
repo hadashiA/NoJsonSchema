@@ -13,6 +13,11 @@ public static class FormatterEmitter
     readonly record struct EmitContext(TypeGraph Graph)
     {
         public bool IsEnum(string name) => Graph.Types.TryGetValue(name, out var d) && d is EnumTypeDescriptor;
+
+        public bool IsStruct(string name) =>
+            Graph.Types.TryGetValue(name, out var d)
+                && d is ObjectTypeDescriptor obj
+                && obj.Style == TypeStyle.ReadonlyRecordStruct;
     }
 
     public static string Emit(ObjectTypeDescriptor type, TypeGraph graph, GenerationOptions options)
@@ -28,17 +33,32 @@ public static class FormatterEmitter
         var formatterName = type.Name + "Formatter";
         var allProps = FlattenProperties(type, graph);
         var ctx = new EmitContext(graph);
+
         using (w.Block($"public static partial class {NameFactory.EscapeIfReserved(formatterName)}"))
         {
             EmitPropertyNameFields(w, allProps);
             w.WriteLine();
-            EmitDeserialize(w, type, options);
-            w.WriteLine();
-            EmitReadInto(w, type, allProps, options, ctx);
-            w.WriteLine();
-            EmitSerialize(w, type, options);
-            w.WriteLine();
-            EmitWriteValue(w, type, allProps, options, ctx);
+
+            if (type.Style == TypeStyle.ReadonlyRecordStruct)
+            {
+                EmitStructDeserialize(w, type);
+                w.WriteLine();
+                EmitStructReadValue(w, type, allProps, ctx);
+                w.WriteLine();
+                EmitStructSerialize(w, type);
+                w.WriteLine();
+                EmitStructWriteValue(w, type, allProps, ctx);
+            }
+            else
+            {
+                EmitDeserialize(w, type, options);
+                w.WriteLine();
+                EmitReadInto(w, type, allProps, options, ctx);
+                w.WriteLine();
+                EmitSerialize(w, type, options);
+                w.WriteLine();
+                EmitWriteValue(w, type, allProps, options, ctx);
+            }
         }
 
         return w.ToString();
@@ -225,6 +245,11 @@ public static class FormatterEmitter
                 w.WriteLine($"value.{p.Name} = {named.Name}Formatter.ReadValue(ref tokenizer);");
                 break;
 
+            case TypeRef.Named named when ctx.IsStruct(named.Name):
+                w.WriteLine("tokenizer.ReadStartObject();");
+                w.WriteLine($"value.{p.Name} = {named.Name}Formatter.ReadValue(ref tokenizer, options);");
+                break;
+
             case TypeRef.Named named:
                 w.WriteLine("tokenizer.ReadStartObject();");
                 w.WriteLine($"var sub_{p.Name} = new {named.Name}();");
@@ -273,6 +298,10 @@ public static class FormatterEmitter
             case TypeRef.Named named when ctx.IsEnum(named.Name):
                 w.WriteLine($"{listVar}.Add({named.Name}Formatter.ReadValue(ref tokenizer));");
                 break;
+            case TypeRef.Named named when ctx.IsStruct(named.Name):
+                w.WriteLine("tokenizer.ReadStartObject();");
+                w.WriteLine($"{listVar}.Add({named.Name}Formatter.ReadValue(ref tokenizer, options));");
+                break;
             case TypeRef.Named named:
                 w.WriteLine("tokenizer.ReadStartObject();");
                 w.WriteLine($"var elem = new {named.Name}();");
@@ -300,6 +329,10 @@ public static class FormatterEmitter
                     break;
                 case TypeRef.Named named when ctx.IsEnum(named.Name):
                     w.WriteLine($"dict_{p.Name}[key_{p.Name}] = {named.Name}Formatter.ReadValue(ref tokenizer);");
+                    break;
+                case TypeRef.Named named when ctx.IsStruct(named.Name):
+                    w.WriteLine("tokenizer.ReadStartObject();");
+                    w.WriteLine($"dict_{p.Name}[key_{p.Name}] = {named.Name}Formatter.ReadValue(ref tokenizer, options);");
                     break;
                 case TypeRef.Named named:
                     w.WriteLine("tokenizer.ReadStartObject();");
@@ -408,6 +441,14 @@ public static class FormatterEmitter
             case TypeRef.Named named when ctx.IsEnum(named.Name):
                 w.WriteLine($"{named.Name}Formatter.WriteValue(ref w, {read});");
                 break;
+            case TypeRef.Named named when ctx.IsStruct(named.Name):
+                {
+                    // Property getters return by value, so spill into a local before passing 'in'.
+                    var local = "__vo_" + p.Name;
+                    w.WriteLine($"var {local} = {read};");
+                    w.WriteLine($"{named.Name}Formatter.WriteValue(ref w, in {local}, options);");
+                    break;
+                }
             case TypeRef.Named named:
                 w.WriteLine($"{named.Name}Formatter.WriteValue(ref w, {read}!, options);");
                 break;
@@ -450,6 +491,10 @@ public static class FormatterEmitter
             case TypeRef.Named named when ctx.IsEnum(named.Name):
                 w.WriteLine($"{named.Name}Formatter.WriteValue(ref w, {accessor});");
                 break;
+            case TypeRef.Named named when ctx.IsStruct(named.Name):
+                // foreach iteration variables / KeyValuePair.Value are already copies — `in` is fine on them.
+                w.WriteLine($"{named.Name}Formatter.WriteValue(ref w, in {accessor}, options);");
+                break;
             case TypeRef.Named named:
                 w.WriteLine($"{named.Name}Formatter.WriteValue(ref w, {accessor}, options);");
                 break;
@@ -473,6 +518,200 @@ public static class FormatterEmitter
     };
 
     static TypeRef Unwrap(TypeRef t) => t is TypeRef.Nullable nu ? Unwrap(nu.Inner) : t;
+
+    // ---------------------------------------------------------------------------------------------
+    // Struct path: deserialize into locals then construct via primary ctor; serialize takes 'in T'.
+    // ---------------------------------------------------------------------------------------------
+
+    static void EmitStructDeserialize(SourceWriter w, ObjectTypeDescriptor type)
+    {
+        using (w.Block($"public static {type.Name} Deserialize(global::System.ReadOnlySpan<byte> utf8Json, NoJsonSerializerOptions? options = null)"))
+        {
+            w.WriteLine("options ??= NoJsonSerializerOptions.Default;");
+            w.WriteLine("var tokenizer = new Utf8JsonTokenizer(utf8Json);");
+            w.WriteLine("tokenizer.ReadStartObject();");
+            w.WriteLine("return ReadValue(ref tokenizer, options);");
+        }
+
+        w.WriteLine();
+        w.WriteLine($"public static {type.Name} Deserialize(byte[] utf8Json, NoJsonSerializerOptions? options = null) => Deserialize((global::System.ReadOnlySpan<byte>)utf8Json, options);");
+    }
+
+    static void EmitStructReadValue(SourceWriter w, ObjectTypeDescriptor type, IReadOnlyList<PropertyDescriptor> properties, EmitContext ctx)
+    {
+        using (w.Block($"internal static {type.Name} ReadValue(ref Utf8JsonTokenizer tokenizer, NoJsonSerializerOptions options)"))
+        {
+            // Local variables for every property; populated in any JSON order.
+            foreach (var p in properties)
+            {
+                var localType = TypeExpression.Render(p.Type);
+                if (!p.IsRequired || p.IsNullable)
+                {
+                    if (!localType.EndsWith("?", StringComparison.Ordinal)) localType += "?";
+                }
+                w.WriteLine($"{localType} __v_{p.Name} = default;");
+            }
+
+            if (properties.Count == 0)
+            {
+                using (w.Block("while (tokenizer.TryReadPropertyName(out var __name))"))
+                {
+                    EmitUnknownPropertyBranch(w, type);
+                }
+            }
+            else
+            {
+                var groups = properties
+                    .GroupBy(p => Encoding.UTF8.GetByteCount(p.JsonName))
+                    .OrderBy(g => g.Key)
+                    .ToList();
+
+                using (w.Block("while (tokenizer.TryReadPropertyName(out var __name))"))
+                {
+                    using (w.Block("switch (__name.Length)"))
+                    {
+                        foreach (var group in groups)
+                        {
+                            w.WriteLine($"case {group.Key}:");
+                            w.Indent();
+                            EmitStructLengthGroup(w, group, ctx, type);
+                            w.WriteLine("break;");
+                            w.Outdent();
+                        }
+                        w.WriteLine("default:");
+                        w.Indent();
+                        EmitUnknownPropertyBranch(w, type);
+                        w.WriteLine("break;");
+                        w.Outdent();
+                    }
+                }
+            }
+
+            // Construct via primary ctor. Parameter order = TypeEmitter's order
+            // (required + non-null first, optionals last) — call by name so we don't depend on the order.
+            var args = new List<string>(properties.Count);
+            foreach (var p in properties)
+            {
+                args.Add($"{NameFactory.EscapeIfReserved(p.Name)}: __v_{p.Name}");
+            }
+            w.WriteLine($"return new {type.Name}({string.Join(", ", args)});");
+        }
+    }
+
+    static void EmitStructLengthGroup(SourceWriter w, IGrouping<int, PropertyDescriptor> group, EmitContext ctx, ObjectTypeDescriptor type)
+    {
+        var first = true;
+        foreach (var p in group)
+        {
+            var literal = EncodeUtf8Literal(EscapeJsonString(p.JsonName));
+            w.WriteLine($"{(first ? "if" : "else if")} (__name.SequenceEqual({literal}))");
+            using (w.BraceBlock())
+            {
+                EmitStructReadInto(w, p, ctx);
+            }
+            first = false;
+        }
+        w.WriteLine("else");
+        using (w.BraceBlock())
+        {
+            EmitUnknownPropertyBranch(w, type);
+        }
+    }
+
+    static void EmitStructReadInto(SourceWriter w, PropertyDescriptor p, EmitContext ctx)
+    {
+        if (p.IsNullable || !p.IsRequired)
+        {
+            using (w.Block("if (tokenizer.TryReadNull())"))
+            {
+                w.WriteLine($"__v_{p.Name} = default;");
+            }
+            w.WriteLine("else");
+            using (w.BraceBlock())
+            {
+                EmitStructReadCore(w, p, ctx);
+            }
+        }
+        else
+        {
+            EmitStructReadCore(w, p, ctx);
+        }
+    }
+
+    static void EmitStructReadCore(SourceWriter w, PropertyDescriptor p, EmitContext ctx)
+    {
+        var inner = Unwrap(p.Type);
+        switch (inner)
+        {
+            case TypeRef.Primitive prim:
+                w.WriteLine($"__v_{p.Name} = {ReadPrimitiveExpr(prim)};");
+                break;
+            case TypeRef.Named named when ctx.IsEnum(named.Name):
+                w.WriteLine($"__v_{p.Name} = {named.Name}Formatter.ReadValue(ref tokenizer);");
+                break;
+            case TypeRef.Named named when ctx.IsStruct(named.Name):
+                w.WriteLine("tokenizer.ReadStartObject();");
+                w.WriteLine($"__v_{p.Name} = {named.Name}Formatter.ReadValue(ref tokenizer, options);");
+                break;
+            case TypeRef.Named named:
+                w.WriteLine("tokenizer.ReadStartObject();");
+                w.WriteLine($"var sub_{p.Name} = new {named.Name}();");
+                w.WriteLine($"{named.Name}Formatter.ReadInto(ref tokenizer, sub_{p.Name}, options);");
+                w.WriteLine($"__v_{p.Name} = sub_{p.Name};");
+                break;
+            case TypeRef.Array arr:
+                {
+                    var elementType = TypeExpression.Render(arr.Element);
+                    w.WriteLine("tokenizer.ReadStartArray();");
+                    w.WriteLine($"var list_{p.Name} = new global::System.Collections.Generic.List<{elementType}>();");
+                    using (w.Block("while (!tokenizer.TryReadEndArray())"))
+                    {
+                        EmitReadElementInto(w, arr.Element, $"list_{p.Name}", ctx);
+                    }
+                    w.WriteLine($"__v_{p.Name} = list_{p.Name}.ToArray();");
+                }
+                break;
+            case TypeRef.Any:
+                w.WriteLine("tokenizer.SkipValue();");
+                w.WriteLine($"__v_{p.Name} = null;");
+                break;
+            default:
+                w.WriteLine($"tokenizer.SkipValue(); // unsupported type for {p.Name}");
+                break;
+        }
+    }
+
+    static void EmitStructSerialize(SourceWriter w, ObjectTypeDescriptor type)
+    {
+        using (w.Block($"public static void Serialize(global::System.Buffers.IBufferWriter<byte> writer, in {type.Name} value, NoJsonSerializerOptions? options = null)"))
+        {
+            w.WriteLine("options ??= NoJsonSerializerOptions.Default;");
+            w.WriteLine("var w = new Utf8JsonBufferWriter(writer);");
+            w.WriteLine("WriteValue(ref w, in value, options);");
+            w.WriteLine("w.Flush();");
+        }
+
+        w.WriteLine();
+        using (w.Block($"public static byte[] SerializeToUtf8Bytes(in {type.Name} value, NoJsonSerializerOptions? options = null)"))
+        {
+            w.WriteLine("var buffer = new global::System.Buffers.ArrayBufferWriter<byte>(256);");
+            w.WriteLine("Serialize(buffer, in value, options);");
+            w.WriteLine("return buffer.WrittenSpan.ToArray();");
+        }
+    }
+
+    static void EmitStructWriteValue(SourceWriter w, ObjectTypeDescriptor type, IReadOnlyList<PropertyDescriptor> properties, EmitContext ctx)
+    {
+        using (w.Block($"internal static void WriteValue(ref Utf8JsonBufferWriter w, in {type.Name} value, NoJsonSerializerOptions options)"))
+        {
+            w.WriteLine("w.WriteStartObject();");
+            foreach (var p in properties)
+            {
+                EmitWriteProperty(w, p, ctx);
+            }
+            w.WriteLine("w.WriteEndObject();");
+        }
+    }
 
     // ---------------------------------------------------------------------------------------------
     // String helpers.

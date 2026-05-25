@@ -45,6 +45,13 @@ static class GenerateCommand
             description: "Treat unknown JSON properties as errors.",
             getDefaultValue: () => false);
 
+        var valueObjectOption = new Option<string[]>(
+            aliases: ["--value-object"],
+            description: "Generate the named $defs type as a readonly record struct (positional / primary-ctor form). Repeatable.")
+        {
+            AllowMultipleArgumentsPerToken = true,
+        };
+
         var command = new Command("generate", "Generate C# code from a JSON Schema.")
         {
             inputOption,
@@ -54,12 +61,14 @@ static class GenerateCommand
             styleOption,
             allofOption,
             strictExtra,
+            valueObjectOption,
         };
 
         command.SetHandler(async context =>
         {
             var input = context.ParseResult.GetValueForOption(inputOption)!;
             var output = context.ParseResult.GetValueForOption(outputOption)!;
+            var valueObjects = context.ParseResult.GetValueForOption(valueObjectOption) ?? [];
             var options = new GenerationOptions
             {
                 Namespace = context.ParseResult.GetValueForOption(namespaceOption)!,
@@ -67,6 +76,7 @@ static class GenerateCommand
                 TypeStyle = context.ParseResult.GetValueForOption(styleOption),
                 AllOfStrategy = context.ParseResult.GetValueForOption(allofOption),
                 StrictExtraProperties = context.ParseResult.GetValueForOption(strictExtra),
+                ValueObjectTypes = new HashSet<string>(valueObjects, StringComparer.Ordinal),
             };
 
             var schemaJson = await File.ReadAllTextAsync(input.FullName).ConfigureAwait(false);

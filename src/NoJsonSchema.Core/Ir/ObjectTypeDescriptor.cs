@@ -3,6 +3,12 @@ namespace NoJsonSchema.Core.Ir;
 public sealed class ObjectTypeDescriptor : TypeDescriptor
 {
     /// <summary>
+    /// C# materialisation style for this type. Defaults to the project-wide
+    /// <see cref="GenerationOptions.TypeStyle"/>; set per-type for value-object generation.
+    /// </summary>
+    public TypeStyle Style { get; init; } = TypeStyle.Class;
+
+    /// <summary>
     /// Name of the base type when this object was synthesised from <c>allOf: [$ref base, inline ...]</c>.
     /// The POCO inherits from it; the Formatter still emits/consumes all fields (own + inherited).
     /// </summary>
