@@ -159,16 +159,18 @@ var u3 = await UserFormatter.DeserializeAsync(networkStream, cancellationToken: 
 
 ## Configuration
 
-All options can be set per-schema in MSBuild metadata, via CLI flags, or via `GenerationOptions` from the library.
+All knobs are surfaced through three equivalent channels — MSBuild metadata on the `AdditionalFiles` entry (source generator), CLI flags (`nojsonschema`), and `GenerationOptions` properties (library).
 
-| MSBuild metadata | CLI flag | What it does |
-|---|---|---|
-| `NoJsonSchemaNamespace` | `-n, --namespace` | Target C# namespace. Defaults to `Generated`. |
-| `NoJsonSchemaTypeStyle` | `--type-style` | `Class` (default) / `Record` / `ReadonlyRecordStruct`. |
-| `NoJsonSchemaValueObjects` | `--value-object` | `;`-separated $defs entries to emit as `readonly partial record struct` (primary-ctor form). |
-| `NoJsonSchemaStrictExtraProperties` | `--strict-extra` | Throw on unknown JSON properties. |
-| `NoJsonSchemaUseRequired` | `--use-required` | Use C# 11 `required` modifier (default: `= null!`). |
-| `NoJsonSchemaIncludeTypes` | `--include-type` | `;`-separated whitelist of $defs entries (transitive deps included automatically). |
+| MSBuild metadata | CLI flag | `GenerationOptions` | Default | What it does |
+|---|---|---|---|---|
+| `NoJsonSchemaNamespace` | `-n, --namespace` | `Namespace` | `Generated` | Target C# namespace. |
+| — | `--root-type` | `RootTypeName` | (none) | Optional root type name override (only useful when the schema's root is itself a single object schema). |
+| `NoJsonSchemaTypeStyle` | `--type-style` | `TypeStyle` | `Class` | `Class` / `Record` / `ReadonlyRecordStruct`. |
+| — | `--allof-strategy` | `AllOfStrategy` | `Inherit` | How to represent `allOf` composition — `Inherit` (emit base class + derived) or `Flatten` (inline all properties into one type). |
+| `NoJsonSchemaStrictExtraProperties` | `--strict-extra` | `StrictExtraProperties` | `false` | Throw `NoJsonFormatException` on unknown JSON properties. |
+| `NoJsonSchemaValueObjects` | `--value-object` | `ValueObjectTypes` | (empty) | `;`/`,`-separated `$defs` entries to emit as `readonly partial record struct` (primary-ctor form). |
+| `NoJsonSchemaUseRequired` | `--use-required` | `UseRequiredModifier` | `false` | Use C# 11 `required` modifier on non-nullable required properties (otherwise `= null!`). |
+| `NoJsonSchemaIncludeTypes` | `--include-type` | `IncludedTypes` | (everything) | `;`/`,`-separated whitelist of `$defs` / `components.schemas` entries to generate (transitive deps included automatically). |
 
 ### Per-type metadata example
 
@@ -179,6 +181,77 @@ All options can be set per-schema in MSBuild metadata, via CLI flags, or via `Ge
   <NoJsonSchemaIncludeTypes>InitializeRequest;StoppedEvent;StackTraceResponse</NoJsonSchemaIncludeTypes>
 </AdditionalFiles>
 ```
+
+## CLI reference
+
+The `nojsonschema` tool has two subcommands. Both accept either a local file path **or** an `http(s)` URL for `--input`.
+
+### `nojsonschema generate`
+
+Generate C# types + UTF-8 parser/emitter from a schema.
+
+```sh
+nojsonschema generate -i <schema> -o <out-dir> [options...]
+```
+
+| Flag | Argument | Default | Description |
+|---|---|---|---|
+| `-i`, `--input` | `<path-or-url>` | **required** | Local path or `http(s)` URL of the JSON Schema / OpenAPI document. |
+| `-o`, `--output` | `<dir>` | **required** | Directory to write generated `.cs` files into (subdirs are created as needed). |
+| `-n`, `--namespace` | `<string>` | `Generated` | Target C# namespace for the emitted types and Serializer. |
+| `--root-type` | `<string>` | (none) | Override the root type's name. Most schemas drive type names from `$defs` entries — this is for the rare case where you want to rename the top-level object. |
+| `--type-style` | `Class \| Record \| ReadonlyRecordStruct` | `Class` | How to emit object types. `Class` uses `{ get; set; }`. `Record` is a C# `record` with `{ get; init; }`. `ReadonlyRecordStruct` is a `readonly partial record struct` with a primary constructor (value-object form). |
+| `--allof-strategy` | `Inherit \| Flatten` | `Inherit` | How to represent `allOf` composition. `Inherit` emits a base class + derived class. `Flatten` inlines all parent properties into a single class. |
+| `--strict-extra` | (flag) | `false` | Throw `NoJsonFormatException` when the JSON payload contains a property the schema didn't declare. Otherwise unknown properties are skipped. |
+| `--value-object` | `<csv>` | (empty) | Comma- or semicolon-separated list of `$defs` entries to emit as `readonly partial record struct` (primary-ctor form). E.g. `--value-object Color,SemVer`. Per-type override of `--type-style`. |
+| `--use-required` | (flag) | `false` | Emit the C# 11 `required` modifier on non-nullable required properties. Without this, `= null!` suppresses CS8618 instead. Shipping a `_SetsRequiredMembersShim.g.cs` polyfill for ns2.0/pre-net7 consumers. |
+| `--include-type` | `<csv>` | (everything) | Whitelist of top-level `$defs` / `components.schemas` entries to generate. Transitive dependencies are included automatically — e.g. `--include-type Pet` will also pull `Cat`, `Dog` if they're `oneOf` branches. Useful for trimming massive schemas (DAP has 192 defs; you might only need a handful). |
+| `-h`, `--help` | (flag) | | Print usage and exit. |
+
+#### Examples
+
+```sh
+# Vanilla: local schema → ./Generated under "MyApp.Models"
+nojsonschema generate -i schema.json -o Generated -n MyApp.Models
+
+# Remote schema with --include-type whitelist (trim 192-def DAP to 13 files)
+nojsonschema generate \
+  -i https://raw.githubusercontent.com/microsoft/debug-adapter-protocol/main/debugAdapterProtocol.json \
+  -o ./Dap -n Dap \
+  --include-type Capabilities,InitializeRequest,StoppedEvent
+
+# Mix: most types as classes, but Checksum/Source as readonly record structs
+nojsonschema generate -i dap.json -o ./Dap -n Dap \
+  --value-object Checksum,Source \
+  --use-required --strict-extra
+```
+
+### `nojsonschema lint`
+
+Parse a schema and print a summary; reports structural problems without generating code.
+
+```sh
+nojsonschema lint -i <schema>
+```
+
+| Flag | Argument | Default | Description |
+|---|---|---|---|
+| `-i`, `--input` | `<path-or-url>` | **required** | Local path or `http(s)` URL of the JSON Schema / OpenAPI document. |
+| `-h`, `--help` | (flag) | | Print usage and exit. |
+
+Output:
+
+```
+$ nojsonschema lint -i https://json.schemastore.org/package.json
+file:        https://json.schemastore.org/package.json
+$schema:     http://json-schema.org/draft-07/schema#
+$id:         https://json.schemastore.org/package.json
+root kind:   Object
+definitions: 29
+properties:  61 (on root)
+```
+
+Exit codes: `0` on success, `1` on any failure (network / IO / parse / schema validation).
 
 ## Supported schema subset
 
