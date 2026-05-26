@@ -18,6 +18,8 @@ env:
 jobs:
   build-dotnet:
     permissions:
+      contents: read    # actions/checkout — explicitly granted because setting any permission
+                        # at job scope clears the workflow defaults (incl. the implicit contents: read).
       id-token: write   # OIDC token for NuGet/login
     runs-on: ubuntu-latest
     timeout-minutes: 10
