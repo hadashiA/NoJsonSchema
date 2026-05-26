@@ -6,7 +6,7 @@ using System.Buffers;
 
 namespace Dap;
 
-public static partial class SetDataBreakpointsResponseFormatter
+static partial class SetDataBreakpointsResponseFormatter
 {
     static global::System.ReadOnlySpan<byte> Name_Seq => "\"seq\":"u8;
     static global::System.ReadOnlySpan<byte> Name_Type => "\"type\":"u8;
@@ -16,27 +16,13 @@ public static partial class SetDataBreakpointsResponseFormatter
     static global::System.ReadOnlySpan<byte> Name_Message => "\"message\":"u8;
     static global::System.ReadOnlySpan<byte> Name_Body => "\"body\":"u8;
     
-    public static SetDataBreakpointsResponse Deserialize(global::System.ReadOnlySpan<byte> utf8Json, NoJsonSerializerOptions? options = null)
+    public static SetDataBreakpointsResponse Deserialize(global::System.ReadOnlySpan<byte> utf8Json, NoJsonSerializerOptions options)
     {
-        options ??= NoJsonSerializerOptions.Default;
         var tokenizer = new Utf8JsonTokenizer(utf8Json);
         tokenizer.ReadStartObject();
         var value = new SetDataBreakpointsResponse();
         ReadInto(ref tokenizer, value, options);
         return value;
-    }
-    
-    public static SetDataBreakpointsResponse Deserialize(byte[] utf8Json, NoJsonSerializerOptions? options = null) => Deserialize((global::System.ReadOnlySpan<byte>)utf8Json, options);
-    
-    public static SetDataBreakpointsResponse Deserialize(global::System.IO.Stream stream, NoJsonSerializerOptions? options = null)
-    {
-        return Deserialize(NoJsonStreamUtility.ReadAllBytes(stream), options);
-    }
-    
-    public static async global::System.Threading.Tasks.ValueTask<SetDataBreakpointsResponse> DeserializeAsync(global::System.IO.Stream stream, NoJsonSerializerOptions? options = null, global::System.Threading.CancellationToken cancellationToken = default)
-    {
-        var __bytes = await NoJsonStreamUtility.ReadAllBytesAsync(stream, cancellationToken).ConfigureAwait(false);
-        return Deserialize(__bytes, options);
     }
     
     internal static void ReadInto(ref Utf8JsonTokenizer tokenizer, SetDataBreakpointsResponse value, NoJsonSerializerOptions options)
@@ -131,33 +117,11 @@ public static partial class SetDataBreakpointsResponseFormatter
         }
     }
     
-    public static void Serialize(global::System.Buffers.IBufferWriter<byte> writer, SetDataBreakpointsResponse value, NoJsonSerializerOptions? options = null)
+    public static void Serialize(global::System.Buffers.IBufferWriter<byte> writer, in SetDataBreakpointsResponse value, NoJsonSerializerOptions options)
     {
-        options ??= NoJsonSerializerOptions.Default;
         var w = new Utf8JsonBufferWriter(writer);
         WriteValue(ref w, value, options);
         w.Flush();
-    }
-    
-    public static byte[] SerializeToUtf8Bytes(SetDataBreakpointsResponse value, NoJsonSerializerOptions? options = null)
-    {
-        var buffer = new global::System.Buffers.ArrayBufferWriter<byte>(256);
-        Serialize(buffer, value, options);
-        return buffer.WrittenSpan.ToArray();
-    }
-    
-    public static void Serialize(global::System.IO.Stream stream, SetDataBreakpointsResponse value, NoJsonSerializerOptions? options = null)
-    {
-        var __buffer = new global::System.Buffers.ArrayBufferWriter<byte>(256);
-        Serialize(__buffer, value, options);
-        stream.Write(__buffer.WrittenSpan);
-    }
-    
-    public static async global::System.Threading.Tasks.ValueTask SerializeAsync(global::System.IO.Stream stream, SetDataBreakpointsResponse value, NoJsonSerializerOptions? options = null, global::System.Threading.CancellationToken cancellationToken = default)
-    {
-        var __buffer = new global::System.Buffers.ArrayBufferWriter<byte>(256);
-        Serialize(__buffer, value, options);
-        await stream.WriteAsync(__buffer.WrittenMemory, cancellationToken).ConfigureAwait(false);
     }
     
     internal static void WriteValue(ref Utf8JsonBufferWriter w, SetDataBreakpointsResponse value, NoJsonSerializerOptions options)
@@ -192,17 +156,4 @@ public static partial class SetDataBreakpointsResponseFormatter
         SetDataBreakpointsResponseBodyFormatter.WriteValue(ref w, value.Body!, options);
         w.WriteEndObject();
     }
-}
-
-sealed class SetDataBreakpointsResponseFormatterAdapter : INoJsonFormatter<SetDataBreakpointsResponse>
-{
-    public static readonly SetDataBreakpointsResponseFormatterAdapter Instance = new();
-    SetDataBreakpointsResponseFormatterAdapter() { }
-    
-    public SetDataBreakpointsResponse Deserialize(global::System.ReadOnlySpan<byte> utf8Json, NoJsonSerializerOptions options) => SetDataBreakpointsResponseFormatter.Deserialize(utf8Json, options);
-    public void Serialize(global::System.Buffers.IBufferWriter<byte> writer, in SetDataBreakpointsResponse value, NoJsonSerializerOptions options) => SetDataBreakpointsResponseFormatter.Serialize(writer, value, options);
-    public SetDataBreakpointsResponse Deserialize(global::System.IO.Stream stream, NoJsonSerializerOptions options) => SetDataBreakpointsResponseFormatter.Deserialize(stream, options);
-    public void Serialize(global::System.IO.Stream stream, in SetDataBreakpointsResponse value, NoJsonSerializerOptions options) => SetDataBreakpointsResponseFormatter.Serialize(stream, value, options);
-    public global::System.Threading.Tasks.ValueTask<SetDataBreakpointsResponse> DeserializeAsync(global::System.IO.Stream stream, NoJsonSerializerOptions options, global::System.Threading.CancellationToken cancellationToken) => SetDataBreakpointsResponseFormatter.DeserializeAsync(stream, options, cancellationToken);
-    public global::System.Threading.Tasks.ValueTask SerializeAsync(global::System.IO.Stream stream, SetDataBreakpointsResponse value, NoJsonSerializerOptions options, global::System.Threading.CancellationToken cancellationToken) => SetDataBreakpointsResponseFormatter.SerializeAsync(stream, value, options, cancellationToken);
 }

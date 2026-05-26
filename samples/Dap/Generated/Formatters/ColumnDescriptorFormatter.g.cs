@@ -6,7 +6,7 @@ using System.Buffers;
 
 namespace Dap;
 
-public static partial class ColumnDescriptorFormatter
+static partial class ColumnDescriptorFormatter
 {
     static global::System.ReadOnlySpan<byte> Name_AttributeName => "\"attributeName\":"u8;
     static global::System.ReadOnlySpan<byte> Name_Label => "\"label\":"u8;
@@ -14,27 +14,13 @@ public static partial class ColumnDescriptorFormatter
     static global::System.ReadOnlySpan<byte> Name_Type => "\"type\":"u8;
     static global::System.ReadOnlySpan<byte> Name_Width => "\"width\":"u8;
     
-    public static ColumnDescriptor Deserialize(global::System.ReadOnlySpan<byte> utf8Json, NoJsonSerializerOptions? options = null)
+    public static ColumnDescriptor Deserialize(global::System.ReadOnlySpan<byte> utf8Json, NoJsonSerializerOptions options)
     {
-        options ??= NoJsonSerializerOptions.Default;
         var tokenizer = new Utf8JsonTokenizer(utf8Json);
         tokenizer.ReadStartObject();
         var value = new ColumnDescriptor();
         ReadInto(ref tokenizer, value, options);
         return value;
-    }
-    
-    public static ColumnDescriptor Deserialize(byte[] utf8Json, NoJsonSerializerOptions? options = null) => Deserialize((global::System.ReadOnlySpan<byte>)utf8Json, options);
-    
-    public static ColumnDescriptor Deserialize(global::System.IO.Stream stream, NoJsonSerializerOptions? options = null)
-    {
-        return Deserialize(NoJsonStreamUtility.ReadAllBytes(stream), options);
-    }
-    
-    public static async global::System.Threading.Tasks.ValueTask<ColumnDescriptor> DeserializeAsync(global::System.IO.Stream stream, NoJsonSerializerOptions? options = null, global::System.Threading.CancellationToken cancellationToken = default)
-    {
-        var __bytes = await NoJsonStreamUtility.ReadAllBytesAsync(stream, cancellationToken).ConfigureAwait(false);
-        return Deserialize(__bytes, options);
     }
     
     internal static void ReadInto(ref Utf8JsonTokenizer tokenizer, ColumnDescriptor value, NoJsonSerializerOptions options)
@@ -80,7 +66,7 @@ public static partial class ColumnDescriptorFormatter
                         else
                         
                         {
-                            value.Width = tokenizer.ReadInt64();
+                            value.Width = tokenizer.ReadUInt32();
                         }
                     }
                     else
@@ -132,33 +118,11 @@ public static partial class ColumnDescriptorFormatter
         }
     }
     
-    public static void Serialize(global::System.Buffers.IBufferWriter<byte> writer, ColumnDescriptor value, NoJsonSerializerOptions? options = null)
+    public static void Serialize(global::System.Buffers.IBufferWriter<byte> writer, in ColumnDescriptor value, NoJsonSerializerOptions options)
     {
-        options ??= NoJsonSerializerOptions.Default;
         var w = new Utf8JsonBufferWriter(writer);
         WriteValue(ref w, value, options);
         w.Flush();
-    }
-    
-    public static byte[] SerializeToUtf8Bytes(ColumnDescriptor value, NoJsonSerializerOptions? options = null)
-    {
-        var buffer = new global::System.Buffers.ArrayBufferWriter<byte>(256);
-        Serialize(buffer, value, options);
-        return buffer.WrittenSpan.ToArray();
-    }
-    
-    public static void Serialize(global::System.IO.Stream stream, ColumnDescriptor value, NoJsonSerializerOptions? options = null)
-    {
-        var __buffer = new global::System.Buffers.ArrayBufferWriter<byte>(256);
-        Serialize(__buffer, value, options);
-        stream.Write(__buffer.WrittenSpan);
-    }
-    
-    public static async global::System.Threading.Tasks.ValueTask SerializeAsync(global::System.IO.Stream stream, ColumnDescriptor value, NoJsonSerializerOptions? options = null, global::System.Threading.CancellationToken cancellationToken = default)
-    {
-        var __buffer = new global::System.Buffers.ArrayBufferWriter<byte>(256);
-        Serialize(__buffer, value, options);
-        await stream.WriteAsync(__buffer.WrittenMemory, cancellationToken).ConfigureAwait(false);
     }
     
     internal static void WriteValue(ref Utf8JsonBufferWriter w, ColumnDescriptor value, NoJsonSerializerOptions options)
@@ -211,21 +175,8 @@ public static partial class ColumnDescriptorFormatter
         
         {
             w.WritePropertyNameRaw(Name_Width);
-            w.WriteInt64(value.Width.Value);
+            w.WriteUInt32(value.Width.Value);
         }
         w.WriteEndObject();
     }
-}
-
-sealed class ColumnDescriptorFormatterAdapter : INoJsonFormatter<ColumnDescriptor>
-{
-    public static readonly ColumnDescriptorFormatterAdapter Instance = new();
-    ColumnDescriptorFormatterAdapter() { }
-    
-    public ColumnDescriptor Deserialize(global::System.ReadOnlySpan<byte> utf8Json, NoJsonSerializerOptions options) => ColumnDescriptorFormatter.Deserialize(utf8Json, options);
-    public void Serialize(global::System.Buffers.IBufferWriter<byte> writer, in ColumnDescriptor value, NoJsonSerializerOptions options) => ColumnDescriptorFormatter.Serialize(writer, value, options);
-    public ColumnDescriptor Deserialize(global::System.IO.Stream stream, NoJsonSerializerOptions options) => ColumnDescriptorFormatter.Deserialize(stream, options);
-    public void Serialize(global::System.IO.Stream stream, in ColumnDescriptor value, NoJsonSerializerOptions options) => ColumnDescriptorFormatter.Serialize(stream, value, options);
-    public global::System.Threading.Tasks.ValueTask<ColumnDescriptor> DeserializeAsync(global::System.IO.Stream stream, NoJsonSerializerOptions options, global::System.Threading.CancellationToken cancellationToken) => ColumnDescriptorFormatter.DeserializeAsync(stream, options, cancellationToken);
-    public global::System.Threading.Tasks.ValueTask SerializeAsync(global::System.IO.Stream stream, ColumnDescriptor value, NoJsonSerializerOptions options, global::System.Threading.CancellationToken cancellationToken) => ColumnDescriptorFormatter.SerializeAsync(stream, value, options, cancellationToken);
 }

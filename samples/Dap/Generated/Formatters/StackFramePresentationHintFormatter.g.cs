@@ -6,29 +6,16 @@ using System.Buffers;
 
 namespace Dap;
 
-public static partial class StackFramePresentationHintFormatter
+static partial class StackFramePresentationHintFormatter
 {
     static global::System.ReadOnlySpan<byte> Member_Normal => "normal"u8;
     static global::System.ReadOnlySpan<byte> Member_Label => "label"u8;
     static global::System.ReadOnlySpan<byte> Member_Subtle => "subtle"u8;
     
-    public static StackFramePresentationHint Deserialize(global::System.ReadOnlySpan<byte> utf8Json, NoJsonSerializerOptions? options = null)
+    public static StackFramePresentationHint Deserialize(global::System.ReadOnlySpan<byte> utf8Json, NoJsonSerializerOptions options)
     {
         var tokenizer = new Utf8JsonTokenizer(utf8Json);
         return ReadValue(ref tokenizer);
-    }
-    
-    public static StackFramePresentationHint Deserialize(byte[] utf8Json, NoJsonSerializerOptions? options = null) => Deserialize((global::System.ReadOnlySpan<byte>)utf8Json, options);
-    
-    public static StackFramePresentationHint Deserialize(global::System.IO.Stream stream, NoJsonSerializerOptions? options = null)
-    {
-        return Deserialize(NoJsonStreamUtility.ReadAllBytes(stream), options);
-    }
-    
-    public static async global::System.Threading.Tasks.ValueTask<StackFramePresentationHint> DeserializeAsync(global::System.IO.Stream stream, NoJsonSerializerOptions? options = null, global::System.Threading.CancellationToken cancellationToken = default)
-    {
-        var __bytes = await NoJsonStreamUtility.ReadAllBytesAsync(stream, cancellationToken).ConfigureAwait(false);
-        return Deserialize(__bytes, options);
     }
     
     internal static StackFramePresentationHint ReadValue(ref Utf8JsonTokenizer tokenizer)
@@ -45,32 +32,11 @@ public static partial class StackFramePresentationHintFormatter
         return default; // unreachable
     }
     
-    public static void Serialize(global::System.Buffers.IBufferWriter<byte> writer, StackFramePresentationHint value, NoJsonSerializerOptions? options = null)
+    public static void Serialize(global::System.Buffers.IBufferWriter<byte> writer, in StackFramePresentationHint value, NoJsonSerializerOptions options)
     {
         var w = new Utf8JsonBufferWriter(writer);
         WriteValue(ref w, value);
         w.Flush();
-    }
-    
-    public static byte[] SerializeToUtf8Bytes(StackFramePresentationHint value, NoJsonSerializerOptions? options = null)
-    {
-        var buffer = new global::System.Buffers.ArrayBufferWriter<byte>(16);
-        Serialize(buffer, value, options);
-        return buffer.WrittenSpan.ToArray();
-    }
-    
-    public static void Serialize(global::System.IO.Stream stream, StackFramePresentationHint value, NoJsonSerializerOptions? options = null)
-    {
-        var __buffer = new global::System.Buffers.ArrayBufferWriter<byte>(16);
-        Serialize(__buffer, value, options);
-        stream.Write(__buffer.WrittenSpan);
-    }
-    
-    public static async global::System.Threading.Tasks.ValueTask SerializeAsync(global::System.IO.Stream stream, StackFramePresentationHint value, NoJsonSerializerOptions? options = null, global::System.Threading.CancellationToken cancellationToken = default)
-    {
-        var __buffer = new global::System.Buffers.ArrayBufferWriter<byte>(16);
-        Serialize(__buffer, value, options);
-        await stream.WriteAsync(__buffer.WrittenMemory, cancellationToken).ConfigureAwait(false);
     }
     
     internal static void WriteValue(ref Utf8JsonBufferWriter w, StackFramePresentationHint value)
@@ -83,17 +49,4 @@ public static partial class StackFramePresentationHintFormatter
             default: throw new global::System.InvalidOperationException("Unknown StackFramePresentationHint value: " + value);
         }
     }
-}
-
-sealed class StackFramePresentationHintFormatterAdapter : INoJsonFormatter<StackFramePresentationHint>
-{
-    public static readonly StackFramePresentationHintFormatterAdapter Instance = new();
-    StackFramePresentationHintFormatterAdapter() { }
-    
-    public StackFramePresentationHint Deserialize(global::System.ReadOnlySpan<byte> utf8Json, NoJsonSerializerOptions options) => StackFramePresentationHintFormatter.Deserialize(utf8Json, options);
-    public void Serialize(global::System.Buffers.IBufferWriter<byte> writer, in StackFramePresentationHint value, NoJsonSerializerOptions options) => StackFramePresentationHintFormatter.Serialize(writer, value, options);
-    public StackFramePresentationHint Deserialize(global::System.IO.Stream stream, NoJsonSerializerOptions options) => StackFramePresentationHintFormatter.Deserialize(stream, options);
-    public void Serialize(global::System.IO.Stream stream, in StackFramePresentationHint value, NoJsonSerializerOptions options) => StackFramePresentationHintFormatter.Serialize(stream, value, options);
-    public global::System.Threading.Tasks.ValueTask<StackFramePresentationHint> DeserializeAsync(global::System.IO.Stream stream, NoJsonSerializerOptions options, global::System.Threading.CancellationToken cancellationToken) => StackFramePresentationHintFormatter.DeserializeAsync(stream, options, cancellationToken);
-    public global::System.Threading.Tasks.ValueTask SerializeAsync(global::System.IO.Stream stream, StackFramePresentationHint value, NoJsonSerializerOptions options, global::System.Threading.CancellationToken cancellationToken) => StackFramePresentationHintFormatter.SerializeAsync(stream, value, options, cancellationToken);
 }

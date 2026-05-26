@@ -22,22 +22,22 @@ public partial class GotoTarget
     /// <summary>
     /// The line of the goto target.
     /// </summary>
-    public long Line { get; set; }
+    public ulong Line { get; set; }
     
     /// <summary>
     /// The column of the goto target.
     /// </summary>
-    public long? Column { get; set; }
+    public ulong? Column { get; set; }
     
     /// <summary>
     /// The end line of the range covered by the goto target.
     /// </summary>
-    public long? EndLine { get; set; }
+    public ulong? EndLine { get; set; }
     
     /// <summary>
     /// The end column of the range covered by the goto target.
     /// </summary>
-    public long? EndColumn { get; set; }
+    public ulong? EndColumn { get; set; }
     
     /// <summary>
     /// A memory reference for the instruction pointer value represented by this target.

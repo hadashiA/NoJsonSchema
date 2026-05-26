@@ -6,34 +6,20 @@ using System.Buffers;
 
 namespace Dap;
 
-public static partial class CompletionsArgumentsFormatter
+static partial class CompletionsArgumentsFormatter
 {
     static global::System.ReadOnlySpan<byte> Name_FrameId => "\"frameId\":"u8;
     static global::System.ReadOnlySpan<byte> Name_Text => "\"text\":"u8;
     static global::System.ReadOnlySpan<byte> Name_Column => "\"column\":"u8;
     static global::System.ReadOnlySpan<byte> Name_Line => "\"line\":"u8;
     
-    public static CompletionsArguments Deserialize(global::System.ReadOnlySpan<byte> utf8Json, NoJsonSerializerOptions? options = null)
+    public static CompletionsArguments Deserialize(global::System.ReadOnlySpan<byte> utf8Json, NoJsonSerializerOptions options)
     {
-        options ??= NoJsonSerializerOptions.Default;
         var tokenizer = new Utf8JsonTokenizer(utf8Json);
         tokenizer.ReadStartObject();
         var value = new CompletionsArguments();
         ReadInto(ref tokenizer, value, options);
         return value;
-    }
-    
-    public static CompletionsArguments Deserialize(byte[] utf8Json, NoJsonSerializerOptions? options = null) => Deserialize((global::System.ReadOnlySpan<byte>)utf8Json, options);
-    
-    public static CompletionsArguments Deserialize(global::System.IO.Stream stream, NoJsonSerializerOptions? options = null)
-    {
-        return Deserialize(NoJsonStreamUtility.ReadAllBytes(stream), options);
-    }
-    
-    public static async global::System.Threading.Tasks.ValueTask<CompletionsArguments> DeserializeAsync(global::System.IO.Stream stream, NoJsonSerializerOptions? options = null, global::System.Threading.CancellationToken cancellationToken = default)
-    {
-        var __bytes = await NoJsonStreamUtility.ReadAllBytesAsync(stream, cancellationToken).ConfigureAwait(false);
-        return Deserialize(__bytes, options);
     }
     
     internal static void ReadInto(ref Utf8JsonTokenizer tokenizer, CompletionsArguments value, NoJsonSerializerOptions options)
@@ -58,7 +44,7 @@ public static partial class CompletionsArgumentsFormatter
                         else
                         
                         {
-                            value.Line = tokenizer.ReadInt64();
+                            value.Line = tokenizer.ReadUInt64();
                         }
                     }
                     else
@@ -72,7 +58,7 @@ public static partial class CompletionsArgumentsFormatter
                     if (__name.SequenceEqual("column"u8))
                     
                     {
-                        value.Column = tokenizer.ReadInt64();
+                        value.Column = tokenizer.ReadUInt64();
                     }
                     else
                     
@@ -110,33 +96,11 @@ public static partial class CompletionsArgumentsFormatter
         }
     }
     
-    public static void Serialize(global::System.Buffers.IBufferWriter<byte> writer, CompletionsArguments value, NoJsonSerializerOptions? options = null)
+    public static void Serialize(global::System.Buffers.IBufferWriter<byte> writer, in CompletionsArguments value, NoJsonSerializerOptions options)
     {
-        options ??= NoJsonSerializerOptions.Default;
         var w = new Utf8JsonBufferWriter(writer);
         WriteValue(ref w, value, options);
         w.Flush();
-    }
-    
-    public static byte[] SerializeToUtf8Bytes(CompletionsArguments value, NoJsonSerializerOptions? options = null)
-    {
-        var buffer = new global::System.Buffers.ArrayBufferWriter<byte>(256);
-        Serialize(buffer, value, options);
-        return buffer.WrittenSpan.ToArray();
-    }
-    
-    public static void Serialize(global::System.IO.Stream stream, CompletionsArguments value, NoJsonSerializerOptions? options = null)
-    {
-        var __buffer = new global::System.Buffers.ArrayBufferWriter<byte>(256);
-        Serialize(__buffer, value, options);
-        stream.Write(__buffer.WrittenSpan);
-    }
-    
-    public static async global::System.Threading.Tasks.ValueTask SerializeAsync(global::System.IO.Stream stream, CompletionsArguments value, NoJsonSerializerOptions? options = null, global::System.Threading.CancellationToken cancellationToken = default)
-    {
-        var __buffer = new global::System.Buffers.ArrayBufferWriter<byte>(256);
-        Serialize(__buffer, value, options);
-        await stream.WriteAsync(__buffer.WrittenMemory, cancellationToken).ConfigureAwait(false);
     }
     
     internal static void WriteValue(ref Utf8JsonBufferWriter w, CompletionsArguments value, NoJsonSerializerOptions options)
@@ -160,7 +124,7 @@ public static partial class CompletionsArgumentsFormatter
         w.WritePropertyNameRaw(Name_Text);
         w.WriteString(value.Text);
         w.WritePropertyNameRaw(Name_Column);
-        w.WriteInt64(value.Column);
+        w.WriteUInt64(value.Column);
         if (value.Line is null)
         {
             if (!options.SkipNullProperties)
@@ -174,21 +138,8 @@ public static partial class CompletionsArgumentsFormatter
         
         {
             w.WritePropertyNameRaw(Name_Line);
-            w.WriteInt64(value.Line.Value);
+            w.WriteUInt64(value.Line.Value);
         }
         w.WriteEndObject();
     }
-}
-
-sealed class CompletionsArgumentsFormatterAdapter : INoJsonFormatter<CompletionsArguments>
-{
-    public static readonly CompletionsArgumentsFormatterAdapter Instance = new();
-    CompletionsArgumentsFormatterAdapter() { }
-    
-    public CompletionsArguments Deserialize(global::System.ReadOnlySpan<byte> utf8Json, NoJsonSerializerOptions options) => CompletionsArgumentsFormatter.Deserialize(utf8Json, options);
-    public void Serialize(global::System.Buffers.IBufferWriter<byte> writer, in CompletionsArguments value, NoJsonSerializerOptions options) => CompletionsArgumentsFormatter.Serialize(writer, value, options);
-    public CompletionsArguments Deserialize(global::System.IO.Stream stream, NoJsonSerializerOptions options) => CompletionsArgumentsFormatter.Deserialize(stream, options);
-    public void Serialize(global::System.IO.Stream stream, in CompletionsArguments value, NoJsonSerializerOptions options) => CompletionsArgumentsFormatter.Serialize(stream, value, options);
-    public global::System.Threading.Tasks.ValueTask<CompletionsArguments> DeserializeAsync(global::System.IO.Stream stream, NoJsonSerializerOptions options, global::System.Threading.CancellationToken cancellationToken) => CompletionsArgumentsFormatter.DeserializeAsync(stream, options, cancellationToken);
-    public global::System.Threading.Tasks.ValueTask SerializeAsync(global::System.IO.Stream stream, CompletionsArguments value, NoJsonSerializerOptions options, global::System.Threading.CancellationToken cancellationToken) => CompletionsArgumentsFormatter.SerializeAsync(stream, value, options, cancellationToken);
 }

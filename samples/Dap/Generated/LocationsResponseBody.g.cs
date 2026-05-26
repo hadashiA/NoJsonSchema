@@ -13,20 +13,20 @@ public partial class LocationsResponseBody
     /// <summary>
     /// The line number of the location. The client capability `linesStartAt1` determines whether it is 0- or 1-based.
     /// </summary>
-    public long Line { get; set; }
+    public ulong Line { get; set; }
     
     /// <summary>
     /// Position of the location within the `line`. It is measured in UTF-16 code units and the client capability `columnsStartAt1` determines whether it is 0- or 1-based. If no column is given, the first position in the start line is assumed.
     /// </summary>
-    public long? Column { get; set; }
+    public ulong? Column { get; set; }
     
     /// <summary>
     /// End line of the location, present if the location refers to a range.  The client capability `linesStartAt1` determines whether it is 0- or 1-based.
     /// </summary>
-    public long? EndLine { get; set; }
+    public ulong? EndLine { get; set; }
     
     /// <summary>
     /// End position of the location within `endLine`, present if the location refers to a range. It is measured in UTF-16 code units and the client capability `columnsStartAt1` determines whether it is 0- or 1-based.
     /// </summary>
-    public long? EndColumn { get; set; }
+    public ulong? EndColumn { get; set; }
 }

@@ -6,7 +6,7 @@ using System.Buffers;
 
 namespace Dap;
 
-public static partial class CompletionItemFormatter
+static partial class CompletionItemFormatter
 {
     static global::System.ReadOnlySpan<byte> Name_Label => "\"label\":"u8;
     static global::System.ReadOnlySpan<byte> Name_Text => "\"text\":"u8;
@@ -18,27 +18,13 @@ public static partial class CompletionItemFormatter
     static global::System.ReadOnlySpan<byte> Name_SelectionStart => "\"selectionStart\":"u8;
     static global::System.ReadOnlySpan<byte> Name_SelectionLength => "\"selectionLength\":"u8;
     
-    public static CompletionItem Deserialize(global::System.ReadOnlySpan<byte> utf8Json, NoJsonSerializerOptions? options = null)
+    public static CompletionItem Deserialize(global::System.ReadOnlySpan<byte> utf8Json, NoJsonSerializerOptions options)
     {
-        options ??= NoJsonSerializerOptions.Default;
         var tokenizer = new Utf8JsonTokenizer(utf8Json);
         tokenizer.ReadStartObject();
         var value = new CompletionItem();
         ReadInto(ref tokenizer, value, options);
         return value;
-    }
-    
-    public static CompletionItem Deserialize(byte[] utf8Json, NoJsonSerializerOptions? options = null) => Deserialize((global::System.ReadOnlySpan<byte>)utf8Json, options);
-    
-    public static CompletionItem Deserialize(global::System.IO.Stream stream, NoJsonSerializerOptions? options = null)
-    {
-        return Deserialize(NoJsonStreamUtility.ReadAllBytes(stream), options);
-    }
-    
-    public static async global::System.Threading.Tasks.ValueTask<CompletionItem> DeserializeAsync(global::System.IO.Stream stream, NoJsonSerializerOptions? options = null, global::System.Threading.CancellationToken cancellationToken = default)
-    {
-        var __bytes = await NoJsonStreamUtility.ReadAllBytesAsync(stream, cancellationToken).ConfigureAwait(false);
-        return Deserialize(__bytes, options);
     }
     
     internal static void ReadInto(ref Utf8JsonTokenizer tokenizer, CompletionItem value, NoJsonSerializerOptions options)
@@ -97,7 +83,7 @@ public static partial class CompletionItemFormatter
                         else
                         
                         {
-                            value.Start = tokenizer.ReadInt64();
+                            value.Start = tokenizer.ReadUInt32();
                         }
                     }
                     else
@@ -131,7 +117,7 @@ public static partial class CompletionItemFormatter
                         else
                         
                         {
-                            value.Length = tokenizer.ReadInt64();
+                            value.Length = tokenizer.ReadUInt32();
                         }
                     }
                     else
@@ -173,7 +159,7 @@ public static partial class CompletionItemFormatter
                         else
                         
                         {
-                            value.SelectionStart = tokenizer.ReadInt64();
+                            value.SelectionStart = tokenizer.ReadUInt32();
                         }
                     }
                     else
@@ -194,7 +180,7 @@ public static partial class CompletionItemFormatter
                         else
                         
                         {
-                            value.SelectionLength = tokenizer.ReadInt64();
+                            value.SelectionLength = tokenizer.ReadUInt32();
                         }
                     }
                     else
@@ -212,33 +198,11 @@ public static partial class CompletionItemFormatter
         }
     }
     
-    public static void Serialize(global::System.Buffers.IBufferWriter<byte> writer, CompletionItem value, NoJsonSerializerOptions? options = null)
+    public static void Serialize(global::System.Buffers.IBufferWriter<byte> writer, in CompletionItem value, NoJsonSerializerOptions options)
     {
-        options ??= NoJsonSerializerOptions.Default;
         var w = new Utf8JsonBufferWriter(writer);
         WriteValue(ref w, value, options);
         w.Flush();
-    }
-    
-    public static byte[] SerializeToUtf8Bytes(CompletionItem value, NoJsonSerializerOptions? options = null)
-    {
-        var buffer = new global::System.Buffers.ArrayBufferWriter<byte>(256);
-        Serialize(buffer, value, options);
-        return buffer.WrittenSpan.ToArray();
-    }
-    
-    public static void Serialize(global::System.IO.Stream stream, CompletionItem value, NoJsonSerializerOptions? options = null)
-    {
-        var __buffer = new global::System.Buffers.ArrayBufferWriter<byte>(256);
-        Serialize(__buffer, value, options);
-        stream.Write(__buffer.WrittenSpan);
-    }
-    
-    public static async global::System.Threading.Tasks.ValueTask SerializeAsync(global::System.IO.Stream stream, CompletionItem value, NoJsonSerializerOptions? options = null, global::System.Threading.CancellationToken cancellationToken = default)
-    {
-        var __buffer = new global::System.Buffers.ArrayBufferWriter<byte>(256);
-        Serialize(__buffer, value, options);
-        await stream.WriteAsync(__buffer.WrittenMemory, cancellationToken).ConfigureAwait(false);
     }
     
     internal static void WriteValue(ref Utf8JsonBufferWriter w, CompletionItem value, NoJsonSerializerOptions options)
@@ -319,7 +283,7 @@ public static partial class CompletionItemFormatter
         
         {
             w.WritePropertyNameRaw(Name_Start);
-            w.WriteInt64(value.Start.Value);
+            w.WriteUInt32(value.Start.Value);
         }
         if (value.Length is null)
         {
@@ -334,7 +298,7 @@ public static partial class CompletionItemFormatter
         
         {
             w.WritePropertyNameRaw(Name_Length);
-            w.WriteInt64(value.Length.Value);
+            w.WriteUInt32(value.Length.Value);
         }
         if (value.SelectionStart is null)
         {
@@ -349,7 +313,7 @@ public static partial class CompletionItemFormatter
         
         {
             w.WritePropertyNameRaw(Name_SelectionStart);
-            w.WriteInt64(value.SelectionStart.Value);
+            w.WriteUInt32(value.SelectionStart.Value);
         }
         if (value.SelectionLength is null)
         {
@@ -364,21 +328,8 @@ public static partial class CompletionItemFormatter
         
         {
             w.WritePropertyNameRaw(Name_SelectionLength);
-            w.WriteInt64(value.SelectionLength.Value);
+            w.WriteUInt32(value.SelectionLength.Value);
         }
         w.WriteEndObject();
     }
-}
-
-sealed class CompletionItemFormatterAdapter : INoJsonFormatter<CompletionItem>
-{
-    public static readonly CompletionItemFormatterAdapter Instance = new();
-    CompletionItemFormatterAdapter() { }
-    
-    public CompletionItem Deserialize(global::System.ReadOnlySpan<byte> utf8Json, NoJsonSerializerOptions options) => CompletionItemFormatter.Deserialize(utf8Json, options);
-    public void Serialize(global::System.Buffers.IBufferWriter<byte> writer, in CompletionItem value, NoJsonSerializerOptions options) => CompletionItemFormatter.Serialize(writer, value, options);
-    public CompletionItem Deserialize(global::System.IO.Stream stream, NoJsonSerializerOptions options) => CompletionItemFormatter.Deserialize(stream, options);
-    public void Serialize(global::System.IO.Stream stream, in CompletionItem value, NoJsonSerializerOptions options) => CompletionItemFormatter.Serialize(stream, value, options);
-    public global::System.Threading.Tasks.ValueTask<CompletionItem> DeserializeAsync(global::System.IO.Stream stream, NoJsonSerializerOptions options, global::System.Threading.CancellationToken cancellationToken) => CompletionItemFormatter.DeserializeAsync(stream, options, cancellationToken);
-    public global::System.Threading.Tasks.ValueTask SerializeAsync(global::System.IO.Stream stream, CompletionItem value, NoJsonSerializerOptions options, global::System.Threading.CancellationToken cancellationToken) => CompletionItemFormatter.SerializeAsync(stream, value, options, cancellationToken);
 }

@@ -6,34 +6,20 @@ using System.Buffers;
 
 namespace Dap;
 
-public static partial class ExceptionInfoResponseBodyFormatter
+static partial class ExceptionInfoResponseBodyFormatter
 {
     static global::System.ReadOnlySpan<byte> Name_ExceptionId => "\"exceptionId\":"u8;
     static global::System.ReadOnlySpan<byte> Name_Description => "\"description\":"u8;
     static global::System.ReadOnlySpan<byte> Name_BreakMode => "\"breakMode\":"u8;
     static global::System.ReadOnlySpan<byte> Name_Details => "\"details\":"u8;
     
-    public static ExceptionInfoResponseBody Deserialize(global::System.ReadOnlySpan<byte> utf8Json, NoJsonSerializerOptions? options = null)
+    public static ExceptionInfoResponseBody Deserialize(global::System.ReadOnlySpan<byte> utf8Json, NoJsonSerializerOptions options)
     {
-        options ??= NoJsonSerializerOptions.Default;
         var tokenizer = new Utf8JsonTokenizer(utf8Json);
         tokenizer.ReadStartObject();
         var value = new ExceptionInfoResponseBody();
         ReadInto(ref tokenizer, value, options);
         return value;
-    }
-    
-    public static ExceptionInfoResponseBody Deserialize(byte[] utf8Json, NoJsonSerializerOptions? options = null) => Deserialize((global::System.ReadOnlySpan<byte>)utf8Json, options);
-    
-    public static ExceptionInfoResponseBody Deserialize(global::System.IO.Stream stream, NoJsonSerializerOptions? options = null)
-    {
-        return Deserialize(NoJsonStreamUtility.ReadAllBytes(stream), options);
-    }
-    
-    public static async global::System.Threading.Tasks.ValueTask<ExceptionInfoResponseBody> DeserializeAsync(global::System.IO.Stream stream, NoJsonSerializerOptions? options = null, global::System.Threading.CancellationToken cancellationToken = default)
-    {
-        var __bytes = await NoJsonStreamUtility.ReadAllBytesAsync(stream, cancellationToken).ConfigureAwait(false);
-        return Deserialize(__bytes, options);
     }
     
     internal static void ReadInto(ref Utf8JsonTokenizer tokenizer, ExceptionInfoResponseBody value, NoJsonSerializerOptions options)
@@ -113,33 +99,11 @@ public static partial class ExceptionInfoResponseBodyFormatter
         }
     }
     
-    public static void Serialize(global::System.Buffers.IBufferWriter<byte> writer, ExceptionInfoResponseBody value, NoJsonSerializerOptions? options = null)
+    public static void Serialize(global::System.Buffers.IBufferWriter<byte> writer, in ExceptionInfoResponseBody value, NoJsonSerializerOptions options)
     {
-        options ??= NoJsonSerializerOptions.Default;
         var w = new Utf8JsonBufferWriter(writer);
         WriteValue(ref w, value, options);
         w.Flush();
-    }
-    
-    public static byte[] SerializeToUtf8Bytes(ExceptionInfoResponseBody value, NoJsonSerializerOptions? options = null)
-    {
-        var buffer = new global::System.Buffers.ArrayBufferWriter<byte>(256);
-        Serialize(buffer, value, options);
-        return buffer.WrittenSpan.ToArray();
-    }
-    
-    public static void Serialize(global::System.IO.Stream stream, ExceptionInfoResponseBody value, NoJsonSerializerOptions? options = null)
-    {
-        var __buffer = new global::System.Buffers.ArrayBufferWriter<byte>(256);
-        Serialize(__buffer, value, options);
-        stream.Write(__buffer.WrittenSpan);
-    }
-    
-    public static async global::System.Threading.Tasks.ValueTask SerializeAsync(global::System.IO.Stream stream, ExceptionInfoResponseBody value, NoJsonSerializerOptions? options = null, global::System.Threading.CancellationToken cancellationToken = default)
-    {
-        var __buffer = new global::System.Buffers.ArrayBufferWriter<byte>(256);
-        Serialize(__buffer, value, options);
-        await stream.WriteAsync(__buffer.WrittenMemory, cancellationToken).ConfigureAwait(false);
     }
     
     internal static void WriteValue(ref Utf8JsonBufferWriter w, ExceptionInfoResponseBody value, NoJsonSerializerOptions options)
@@ -181,17 +145,4 @@ public static partial class ExceptionInfoResponseBodyFormatter
         }
         w.WriteEndObject();
     }
-}
-
-sealed class ExceptionInfoResponseBodyFormatterAdapter : INoJsonFormatter<ExceptionInfoResponseBody>
-{
-    public static readonly ExceptionInfoResponseBodyFormatterAdapter Instance = new();
-    ExceptionInfoResponseBodyFormatterAdapter() { }
-    
-    public ExceptionInfoResponseBody Deserialize(global::System.ReadOnlySpan<byte> utf8Json, NoJsonSerializerOptions options) => ExceptionInfoResponseBodyFormatter.Deserialize(utf8Json, options);
-    public void Serialize(global::System.Buffers.IBufferWriter<byte> writer, in ExceptionInfoResponseBody value, NoJsonSerializerOptions options) => ExceptionInfoResponseBodyFormatter.Serialize(writer, value, options);
-    public ExceptionInfoResponseBody Deserialize(global::System.IO.Stream stream, NoJsonSerializerOptions options) => ExceptionInfoResponseBodyFormatter.Deserialize(stream, options);
-    public void Serialize(global::System.IO.Stream stream, in ExceptionInfoResponseBody value, NoJsonSerializerOptions options) => ExceptionInfoResponseBodyFormatter.Serialize(stream, value, options);
-    public global::System.Threading.Tasks.ValueTask<ExceptionInfoResponseBody> DeserializeAsync(global::System.IO.Stream stream, NoJsonSerializerOptions options, global::System.Threading.CancellationToken cancellationToken) => ExceptionInfoResponseBodyFormatter.DeserializeAsync(stream, options, cancellationToken);
-    public global::System.Threading.Tasks.ValueTask SerializeAsync(global::System.IO.Stream stream, ExceptionInfoResponseBody value, NoJsonSerializerOptions options, global::System.Threading.CancellationToken cancellationToken) => ExceptionInfoResponseBodyFormatter.SerializeAsync(stream, value, options, cancellationToken);
 }

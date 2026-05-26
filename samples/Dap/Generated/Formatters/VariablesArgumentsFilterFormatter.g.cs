@@ -6,28 +6,15 @@ using System.Buffers;
 
 namespace Dap;
 
-public static partial class VariablesArgumentsFilterFormatter
+static partial class VariablesArgumentsFilterFormatter
 {
     static global::System.ReadOnlySpan<byte> Member_Indexed => "indexed"u8;
     static global::System.ReadOnlySpan<byte> Member_Named => "named"u8;
     
-    public static VariablesArgumentsFilter Deserialize(global::System.ReadOnlySpan<byte> utf8Json, NoJsonSerializerOptions? options = null)
+    public static VariablesArgumentsFilter Deserialize(global::System.ReadOnlySpan<byte> utf8Json, NoJsonSerializerOptions options)
     {
         var tokenizer = new Utf8JsonTokenizer(utf8Json);
         return ReadValue(ref tokenizer);
-    }
-    
-    public static VariablesArgumentsFilter Deserialize(byte[] utf8Json, NoJsonSerializerOptions? options = null) => Deserialize((global::System.ReadOnlySpan<byte>)utf8Json, options);
-    
-    public static VariablesArgumentsFilter Deserialize(global::System.IO.Stream stream, NoJsonSerializerOptions? options = null)
-    {
-        return Deserialize(NoJsonStreamUtility.ReadAllBytes(stream), options);
-    }
-    
-    public static async global::System.Threading.Tasks.ValueTask<VariablesArgumentsFilter> DeserializeAsync(global::System.IO.Stream stream, NoJsonSerializerOptions? options = null, global::System.Threading.CancellationToken cancellationToken = default)
-    {
-        var __bytes = await NoJsonStreamUtility.ReadAllBytesAsync(stream, cancellationToken).ConfigureAwait(false);
-        return Deserialize(__bytes, options);
     }
     
     internal static VariablesArgumentsFilter ReadValue(ref Utf8JsonTokenizer tokenizer)
@@ -43,32 +30,11 @@ public static partial class VariablesArgumentsFilterFormatter
         return default; // unreachable
     }
     
-    public static void Serialize(global::System.Buffers.IBufferWriter<byte> writer, VariablesArgumentsFilter value, NoJsonSerializerOptions? options = null)
+    public static void Serialize(global::System.Buffers.IBufferWriter<byte> writer, in VariablesArgumentsFilter value, NoJsonSerializerOptions options)
     {
         var w = new Utf8JsonBufferWriter(writer);
         WriteValue(ref w, value);
         w.Flush();
-    }
-    
-    public static byte[] SerializeToUtf8Bytes(VariablesArgumentsFilter value, NoJsonSerializerOptions? options = null)
-    {
-        var buffer = new global::System.Buffers.ArrayBufferWriter<byte>(16);
-        Serialize(buffer, value, options);
-        return buffer.WrittenSpan.ToArray();
-    }
-    
-    public static void Serialize(global::System.IO.Stream stream, VariablesArgumentsFilter value, NoJsonSerializerOptions? options = null)
-    {
-        var __buffer = new global::System.Buffers.ArrayBufferWriter<byte>(16);
-        Serialize(__buffer, value, options);
-        stream.Write(__buffer.WrittenSpan);
-    }
-    
-    public static async global::System.Threading.Tasks.ValueTask SerializeAsync(global::System.IO.Stream stream, VariablesArgumentsFilter value, NoJsonSerializerOptions? options = null, global::System.Threading.CancellationToken cancellationToken = default)
-    {
-        var __buffer = new global::System.Buffers.ArrayBufferWriter<byte>(16);
-        Serialize(__buffer, value, options);
-        await stream.WriteAsync(__buffer.WrittenMemory, cancellationToken).ConfigureAwait(false);
     }
     
     internal static void WriteValue(ref Utf8JsonBufferWriter w, VariablesArgumentsFilter value)
@@ -80,17 +46,4 @@ public static partial class VariablesArgumentsFilterFormatter
             default: throw new global::System.InvalidOperationException("Unknown VariablesArgumentsFilter value: " + value);
         }
     }
-}
-
-sealed class VariablesArgumentsFilterFormatterAdapter : INoJsonFormatter<VariablesArgumentsFilter>
-{
-    public static readonly VariablesArgumentsFilterFormatterAdapter Instance = new();
-    VariablesArgumentsFilterFormatterAdapter() { }
-    
-    public VariablesArgumentsFilter Deserialize(global::System.ReadOnlySpan<byte> utf8Json, NoJsonSerializerOptions options) => VariablesArgumentsFilterFormatter.Deserialize(utf8Json, options);
-    public void Serialize(global::System.Buffers.IBufferWriter<byte> writer, in VariablesArgumentsFilter value, NoJsonSerializerOptions options) => VariablesArgumentsFilterFormatter.Serialize(writer, value, options);
-    public VariablesArgumentsFilter Deserialize(global::System.IO.Stream stream, NoJsonSerializerOptions options) => VariablesArgumentsFilterFormatter.Deserialize(stream, options);
-    public void Serialize(global::System.IO.Stream stream, in VariablesArgumentsFilter value, NoJsonSerializerOptions options) => VariablesArgumentsFilterFormatter.Serialize(stream, value, options);
-    public global::System.Threading.Tasks.ValueTask<VariablesArgumentsFilter> DeserializeAsync(global::System.IO.Stream stream, NoJsonSerializerOptions options, global::System.Threading.CancellationToken cancellationToken) => VariablesArgumentsFilterFormatter.DeserializeAsync(stream, options, cancellationToken);
-    public global::System.Threading.Tasks.ValueTask SerializeAsync(global::System.IO.Stream stream, VariablesArgumentsFilter value, NoJsonSerializerOptions options, global::System.Threading.CancellationToken cancellationToken) => VariablesArgumentsFilterFormatter.SerializeAsync(stream, value, options, cancellationToken);
 }

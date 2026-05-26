@@ -21,10 +21,10 @@ public partial class CompletionsArguments
     /// <summary>
     /// The position within `text` for which to determine the completion proposals. It is measured in UTF-16 code units and the client capability `columnsStartAt1` determines whether it is 0- or 1-based.
     /// </summary>
-    public long Column { get; set; }
+    public ulong Column { get; set; }
     
     /// <summary>
     /// A line for which to determine the completion proposals. If missing the first line of the text is assumed.
     /// </summary>
-    public long? Line { get; set; }
+    public ulong? Line { get; set; }
 }

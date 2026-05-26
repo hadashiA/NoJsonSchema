@@ -29,7 +29,7 @@ public partial class DataBreakpointInfoArguments
     /// 
     /// Clients may set this property only if the `supportsDataBreakpointBytes` capability is true.
     /// </summary>
-    public long? Bytes { get; set; }
+    public uint? Bytes { get; set; }
     
     /// <summary>
     /// If `true`, the `name` is a memory address and the debugger should interpret it as a decimal value, or hex value if it is prefixed with `0x`.

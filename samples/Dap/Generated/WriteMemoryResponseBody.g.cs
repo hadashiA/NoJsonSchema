@@ -13,5 +13,5 @@ public partial class WriteMemoryResponseBody
     /// <summary>
     /// Property that should be returned when `allowPartial` is true to indicate the number of bytes starting from address that were successfully written.
     /// </summary>
-    public long? BytesWritten { get; set; }
+    public uint? BytesWritten { get; set; }
 }

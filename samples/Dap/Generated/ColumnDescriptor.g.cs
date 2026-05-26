@@ -33,5 +33,5 @@ public partial class ColumnDescriptor
     /// <summary>
     /// Width of this column in characters (hint only).
     /// </summary>
-    public long? Width { get; set; }
+    public uint? Width { get; set; }
 }

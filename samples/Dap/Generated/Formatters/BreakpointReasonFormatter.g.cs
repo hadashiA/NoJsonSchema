@@ -6,28 +6,15 @@ using System.Buffers;
 
 namespace Dap;
 
-public static partial class BreakpointReasonFormatter
+static partial class BreakpointReasonFormatter
 {
     static global::System.ReadOnlySpan<byte> Member_Pending => "pending"u8;
     static global::System.ReadOnlySpan<byte> Member_Failed => "failed"u8;
     
-    public static BreakpointReason Deserialize(global::System.ReadOnlySpan<byte> utf8Json, NoJsonSerializerOptions? options = null)
+    public static BreakpointReason Deserialize(global::System.ReadOnlySpan<byte> utf8Json, NoJsonSerializerOptions options)
     {
         var tokenizer = new Utf8JsonTokenizer(utf8Json);
         return ReadValue(ref tokenizer);
-    }
-    
-    public static BreakpointReason Deserialize(byte[] utf8Json, NoJsonSerializerOptions? options = null) => Deserialize((global::System.ReadOnlySpan<byte>)utf8Json, options);
-    
-    public static BreakpointReason Deserialize(global::System.IO.Stream stream, NoJsonSerializerOptions? options = null)
-    {
-        return Deserialize(NoJsonStreamUtility.ReadAllBytes(stream), options);
-    }
-    
-    public static async global::System.Threading.Tasks.ValueTask<BreakpointReason> DeserializeAsync(global::System.IO.Stream stream, NoJsonSerializerOptions? options = null, global::System.Threading.CancellationToken cancellationToken = default)
-    {
-        var __bytes = await NoJsonStreamUtility.ReadAllBytesAsync(stream, cancellationToken).ConfigureAwait(false);
-        return Deserialize(__bytes, options);
     }
     
     internal static BreakpointReason ReadValue(ref Utf8JsonTokenizer tokenizer)
@@ -43,32 +30,11 @@ public static partial class BreakpointReasonFormatter
         return default; // unreachable
     }
     
-    public static void Serialize(global::System.Buffers.IBufferWriter<byte> writer, BreakpointReason value, NoJsonSerializerOptions? options = null)
+    public static void Serialize(global::System.Buffers.IBufferWriter<byte> writer, in BreakpointReason value, NoJsonSerializerOptions options)
     {
         var w = new Utf8JsonBufferWriter(writer);
         WriteValue(ref w, value);
         w.Flush();
-    }
-    
-    public static byte[] SerializeToUtf8Bytes(BreakpointReason value, NoJsonSerializerOptions? options = null)
-    {
-        var buffer = new global::System.Buffers.ArrayBufferWriter<byte>(16);
-        Serialize(buffer, value, options);
-        return buffer.WrittenSpan.ToArray();
-    }
-    
-    public static void Serialize(global::System.IO.Stream stream, BreakpointReason value, NoJsonSerializerOptions? options = null)
-    {
-        var __buffer = new global::System.Buffers.ArrayBufferWriter<byte>(16);
-        Serialize(__buffer, value, options);
-        stream.Write(__buffer.WrittenSpan);
-    }
-    
-    public static async global::System.Threading.Tasks.ValueTask SerializeAsync(global::System.IO.Stream stream, BreakpointReason value, NoJsonSerializerOptions? options = null, global::System.Threading.CancellationToken cancellationToken = default)
-    {
-        var __buffer = new global::System.Buffers.ArrayBufferWriter<byte>(16);
-        Serialize(__buffer, value, options);
-        await stream.WriteAsync(__buffer.WrittenMemory, cancellationToken).ConfigureAwait(false);
     }
     
     internal static void WriteValue(ref Utf8JsonBufferWriter w, BreakpointReason value)
@@ -80,17 +46,4 @@ public static partial class BreakpointReasonFormatter
             default: throw new global::System.InvalidOperationException("Unknown BreakpointReason value: " + value);
         }
     }
-}
-
-sealed class BreakpointReasonFormatterAdapter : INoJsonFormatter<BreakpointReason>
-{
-    public static readonly BreakpointReasonFormatterAdapter Instance = new();
-    BreakpointReasonFormatterAdapter() { }
-    
-    public BreakpointReason Deserialize(global::System.ReadOnlySpan<byte> utf8Json, NoJsonSerializerOptions options) => BreakpointReasonFormatter.Deserialize(utf8Json, options);
-    public void Serialize(global::System.Buffers.IBufferWriter<byte> writer, in BreakpointReason value, NoJsonSerializerOptions options) => BreakpointReasonFormatter.Serialize(writer, value, options);
-    public BreakpointReason Deserialize(global::System.IO.Stream stream, NoJsonSerializerOptions options) => BreakpointReasonFormatter.Deserialize(stream, options);
-    public void Serialize(global::System.IO.Stream stream, in BreakpointReason value, NoJsonSerializerOptions options) => BreakpointReasonFormatter.Serialize(stream, value, options);
-    public global::System.Threading.Tasks.ValueTask<BreakpointReason> DeserializeAsync(global::System.IO.Stream stream, NoJsonSerializerOptions options, global::System.Threading.CancellationToken cancellationToken) => BreakpointReasonFormatter.DeserializeAsync(stream, options, cancellationToken);
-    public global::System.Threading.Tasks.ValueTask SerializeAsync(global::System.IO.Stream stream, BreakpointReason value, NoJsonSerializerOptions options, global::System.Threading.CancellationToken cancellationToken) => BreakpointReasonFormatter.SerializeAsync(stream, value, options, cancellationToken);
 }

@@ -21,14 +21,14 @@ public partial class EvaluateArguments
     /// <summary>
     /// The contextual line where the expression should be evaluated. In the &#39;hover&#39; context, this should be set to the start of the expression being hovered.
     /// </summary>
-    public long? Line { get; set; }
+    public ulong? Line { get; set; }
     
     /// <summary>
     /// The contextual column where the expression should be evaluated. This may be provided if `line` is also provided.
     /// 
     /// It is measured in UTF-16 code units and the client capability `columnsStartAt1` determines whether it is 0- or 1-based.
     /// </summary>
-    public long? Column { get; set; }
+    public ulong? Column { get; set; }
     
     /// <summary>
     /// The contextual source in which the `line` is found. This must be provided if `line` is provided.

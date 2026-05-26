@@ -6,28 +6,15 @@ using System.Buffers;
 
 namespace Dap;
 
-public static partial class DisassembledInstructionPresentationHintFormatter
+static partial class DisassembledInstructionPresentationHintFormatter
 {
     static global::System.ReadOnlySpan<byte> Member_Normal => "normal"u8;
     static global::System.ReadOnlySpan<byte> Member_Invalid => "invalid"u8;
     
-    public static DisassembledInstructionPresentationHint Deserialize(global::System.ReadOnlySpan<byte> utf8Json, NoJsonSerializerOptions? options = null)
+    public static DisassembledInstructionPresentationHint Deserialize(global::System.ReadOnlySpan<byte> utf8Json, NoJsonSerializerOptions options)
     {
         var tokenizer = new Utf8JsonTokenizer(utf8Json);
         return ReadValue(ref tokenizer);
-    }
-    
-    public static DisassembledInstructionPresentationHint Deserialize(byte[] utf8Json, NoJsonSerializerOptions? options = null) => Deserialize((global::System.ReadOnlySpan<byte>)utf8Json, options);
-    
-    public static DisassembledInstructionPresentationHint Deserialize(global::System.IO.Stream stream, NoJsonSerializerOptions? options = null)
-    {
-        return Deserialize(NoJsonStreamUtility.ReadAllBytes(stream), options);
-    }
-    
-    public static async global::System.Threading.Tasks.ValueTask<DisassembledInstructionPresentationHint> DeserializeAsync(global::System.IO.Stream stream, NoJsonSerializerOptions? options = null, global::System.Threading.CancellationToken cancellationToken = default)
-    {
-        var __bytes = await NoJsonStreamUtility.ReadAllBytesAsync(stream, cancellationToken).ConfigureAwait(false);
-        return Deserialize(__bytes, options);
     }
     
     internal static DisassembledInstructionPresentationHint ReadValue(ref Utf8JsonTokenizer tokenizer)
@@ -43,32 +30,11 @@ public static partial class DisassembledInstructionPresentationHintFormatter
         return default; // unreachable
     }
     
-    public static void Serialize(global::System.Buffers.IBufferWriter<byte> writer, DisassembledInstructionPresentationHint value, NoJsonSerializerOptions? options = null)
+    public static void Serialize(global::System.Buffers.IBufferWriter<byte> writer, in DisassembledInstructionPresentationHint value, NoJsonSerializerOptions options)
     {
         var w = new Utf8JsonBufferWriter(writer);
         WriteValue(ref w, value);
         w.Flush();
-    }
-    
-    public static byte[] SerializeToUtf8Bytes(DisassembledInstructionPresentationHint value, NoJsonSerializerOptions? options = null)
-    {
-        var buffer = new global::System.Buffers.ArrayBufferWriter<byte>(16);
-        Serialize(buffer, value, options);
-        return buffer.WrittenSpan.ToArray();
-    }
-    
-    public static void Serialize(global::System.IO.Stream stream, DisassembledInstructionPresentationHint value, NoJsonSerializerOptions? options = null)
-    {
-        var __buffer = new global::System.Buffers.ArrayBufferWriter<byte>(16);
-        Serialize(__buffer, value, options);
-        stream.Write(__buffer.WrittenSpan);
-    }
-    
-    public static async global::System.Threading.Tasks.ValueTask SerializeAsync(global::System.IO.Stream stream, DisassembledInstructionPresentationHint value, NoJsonSerializerOptions? options = null, global::System.Threading.CancellationToken cancellationToken = default)
-    {
-        var __buffer = new global::System.Buffers.ArrayBufferWriter<byte>(16);
-        Serialize(__buffer, value, options);
-        await stream.WriteAsync(__buffer.WrittenMemory, cancellationToken).ConfigureAwait(false);
     }
     
     internal static void WriteValue(ref Utf8JsonBufferWriter w, DisassembledInstructionPresentationHint value)
@@ -80,17 +46,4 @@ public static partial class DisassembledInstructionPresentationHintFormatter
             default: throw new global::System.InvalidOperationException("Unknown DisassembledInstructionPresentationHint value: " + value);
         }
     }
-}
-
-sealed class DisassembledInstructionPresentationHintFormatterAdapter : INoJsonFormatter<DisassembledInstructionPresentationHint>
-{
-    public static readonly DisassembledInstructionPresentationHintFormatterAdapter Instance = new();
-    DisassembledInstructionPresentationHintFormatterAdapter() { }
-    
-    public DisassembledInstructionPresentationHint Deserialize(global::System.ReadOnlySpan<byte> utf8Json, NoJsonSerializerOptions options) => DisassembledInstructionPresentationHintFormatter.Deserialize(utf8Json, options);
-    public void Serialize(global::System.Buffers.IBufferWriter<byte> writer, in DisassembledInstructionPresentationHint value, NoJsonSerializerOptions options) => DisassembledInstructionPresentationHintFormatter.Serialize(writer, value, options);
-    public DisassembledInstructionPresentationHint Deserialize(global::System.IO.Stream stream, NoJsonSerializerOptions options) => DisassembledInstructionPresentationHintFormatter.Deserialize(stream, options);
-    public void Serialize(global::System.IO.Stream stream, in DisassembledInstructionPresentationHint value, NoJsonSerializerOptions options) => DisassembledInstructionPresentationHintFormatter.Serialize(stream, value, options);
-    public global::System.Threading.Tasks.ValueTask<DisassembledInstructionPresentationHint> DeserializeAsync(global::System.IO.Stream stream, NoJsonSerializerOptions options, global::System.Threading.CancellationToken cancellationToken) => DisassembledInstructionPresentationHintFormatter.DeserializeAsync(stream, options, cancellationToken);
-    public global::System.Threading.Tasks.ValueTask SerializeAsync(global::System.IO.Stream stream, DisassembledInstructionPresentationHint value, NoJsonSerializerOptions options, global::System.Threading.CancellationToken cancellationToken) => DisassembledInstructionPresentationHintFormatter.SerializeAsync(stream, value, options, cancellationToken);
 }

@@ -6,34 +6,20 @@ using System.Buffers;
 
 namespace Dap;
 
-public static partial class StackTraceArgumentsFormatter
+static partial class StackTraceArgumentsFormatter
 {
     static global::System.ReadOnlySpan<byte> Name_ThreadId => "\"threadId\":"u8;
     static global::System.ReadOnlySpan<byte> Name_StartFrame => "\"startFrame\":"u8;
     static global::System.ReadOnlySpan<byte> Name_Levels => "\"levels\":"u8;
     static global::System.ReadOnlySpan<byte> Name_Format => "\"format\":"u8;
     
-    public static StackTraceArguments Deserialize(global::System.ReadOnlySpan<byte> utf8Json, NoJsonSerializerOptions? options = null)
+    public static StackTraceArguments Deserialize(global::System.ReadOnlySpan<byte> utf8Json, NoJsonSerializerOptions options)
     {
-        options ??= NoJsonSerializerOptions.Default;
         var tokenizer = new Utf8JsonTokenizer(utf8Json);
         tokenizer.ReadStartObject();
         var value = new StackTraceArguments();
         ReadInto(ref tokenizer, value, options);
         return value;
-    }
-    
-    public static StackTraceArguments Deserialize(byte[] utf8Json, NoJsonSerializerOptions? options = null) => Deserialize((global::System.ReadOnlySpan<byte>)utf8Json, options);
-    
-    public static StackTraceArguments Deserialize(global::System.IO.Stream stream, NoJsonSerializerOptions? options = null)
-    {
-        return Deserialize(NoJsonStreamUtility.ReadAllBytes(stream), options);
-    }
-    
-    public static async global::System.Threading.Tasks.ValueTask<StackTraceArguments> DeserializeAsync(global::System.IO.Stream stream, NoJsonSerializerOptions? options = null, global::System.Threading.CancellationToken cancellationToken = default)
-    {
-        var __bytes = await NoJsonStreamUtility.ReadAllBytesAsync(stream, cancellationToken).ConfigureAwait(false);
-        return Deserialize(__bytes, options);
     }
     
     internal static void ReadInto(ref Utf8JsonTokenizer tokenizer, StackTraceArguments value, NoJsonSerializerOptions options)
@@ -53,7 +39,7 @@ public static partial class StackTraceArgumentsFormatter
                         else
                         
                         {
-                            value.Levels = tokenizer.ReadInt64();
+                            value.Levels = tokenizer.ReadUInt32();
                         }
                     }
                     else if (__name.SequenceEqual("format"u8))
@@ -103,7 +89,7 @@ public static partial class StackTraceArgumentsFormatter
                         else
                         
                         {
-                            value.StartFrame = tokenizer.ReadInt64();
+                            value.StartFrame = tokenizer.ReadUInt32();
                         }
                     }
                     else
@@ -121,33 +107,11 @@ public static partial class StackTraceArgumentsFormatter
         }
     }
     
-    public static void Serialize(global::System.Buffers.IBufferWriter<byte> writer, StackTraceArguments value, NoJsonSerializerOptions? options = null)
+    public static void Serialize(global::System.Buffers.IBufferWriter<byte> writer, in StackTraceArguments value, NoJsonSerializerOptions options)
     {
-        options ??= NoJsonSerializerOptions.Default;
         var w = new Utf8JsonBufferWriter(writer);
         WriteValue(ref w, value, options);
         w.Flush();
-    }
-    
-    public static byte[] SerializeToUtf8Bytes(StackTraceArguments value, NoJsonSerializerOptions? options = null)
-    {
-        var buffer = new global::System.Buffers.ArrayBufferWriter<byte>(256);
-        Serialize(buffer, value, options);
-        return buffer.WrittenSpan.ToArray();
-    }
-    
-    public static void Serialize(global::System.IO.Stream stream, StackTraceArguments value, NoJsonSerializerOptions? options = null)
-    {
-        var __buffer = new global::System.Buffers.ArrayBufferWriter<byte>(256);
-        Serialize(__buffer, value, options);
-        stream.Write(__buffer.WrittenSpan);
-    }
-    
-    public static async global::System.Threading.Tasks.ValueTask SerializeAsync(global::System.IO.Stream stream, StackTraceArguments value, NoJsonSerializerOptions? options = null, global::System.Threading.CancellationToken cancellationToken = default)
-    {
-        var __buffer = new global::System.Buffers.ArrayBufferWriter<byte>(256);
-        Serialize(__buffer, value, options);
-        await stream.WriteAsync(__buffer.WrittenMemory, cancellationToken).ConfigureAwait(false);
     }
     
     internal static void WriteValue(ref Utf8JsonBufferWriter w, StackTraceArguments value, NoJsonSerializerOptions options)
@@ -168,7 +132,7 @@ public static partial class StackTraceArgumentsFormatter
         
         {
             w.WritePropertyNameRaw(Name_StartFrame);
-            w.WriteInt64(value.StartFrame.Value);
+            w.WriteUInt32(value.StartFrame.Value);
         }
         if (value.Levels is null)
         {
@@ -183,7 +147,7 @@ public static partial class StackTraceArgumentsFormatter
         
         {
             w.WritePropertyNameRaw(Name_Levels);
-            w.WriteInt64(value.Levels.Value);
+            w.WriteUInt32(value.Levels.Value);
         }
         if (value.Format is null)
         {
@@ -202,17 +166,4 @@ public static partial class StackTraceArgumentsFormatter
         }
         w.WriteEndObject();
     }
-}
-
-sealed class StackTraceArgumentsFormatterAdapter : INoJsonFormatter<StackTraceArguments>
-{
-    public static readonly StackTraceArgumentsFormatterAdapter Instance = new();
-    StackTraceArgumentsFormatterAdapter() { }
-    
-    public StackTraceArguments Deserialize(global::System.ReadOnlySpan<byte> utf8Json, NoJsonSerializerOptions options) => StackTraceArgumentsFormatter.Deserialize(utf8Json, options);
-    public void Serialize(global::System.Buffers.IBufferWriter<byte> writer, in StackTraceArguments value, NoJsonSerializerOptions options) => StackTraceArgumentsFormatter.Serialize(writer, value, options);
-    public StackTraceArguments Deserialize(global::System.IO.Stream stream, NoJsonSerializerOptions options) => StackTraceArgumentsFormatter.Deserialize(stream, options);
-    public void Serialize(global::System.IO.Stream stream, in StackTraceArguments value, NoJsonSerializerOptions options) => StackTraceArgumentsFormatter.Serialize(stream, value, options);
-    public global::System.Threading.Tasks.ValueTask<StackTraceArguments> DeserializeAsync(global::System.IO.Stream stream, NoJsonSerializerOptions options, global::System.Threading.CancellationToken cancellationToken) => StackTraceArgumentsFormatter.DeserializeAsync(stream, options, cancellationToken);
-    public global::System.Threading.Tasks.ValueTask SerializeAsync(global::System.IO.Stream stream, StackTraceArguments value, NoJsonSerializerOptions options, global::System.Threading.CancellationToken cancellationToken) => StackTraceArgumentsFormatter.SerializeAsync(stream, value, options, cancellationToken);
 }

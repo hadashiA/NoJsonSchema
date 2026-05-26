@@ -16,10 +16,10 @@ public partial class GotoTargetsArguments
     /// <summary>
     /// The line location for which the goto targets are determined.
     /// </summary>
-    public long Line { get; set; }
+    public ulong Line { get; set; }
     
     /// <summary>
     /// The position within `line` for which the goto targets are determined. It is measured in UTF-16 code units and the client capability `columnsStartAt1` determines whether it is 0- or 1-based.
     /// </summary>
-    public long? Column { get; set; }
+    public ulong? Column { get; set; }
 }

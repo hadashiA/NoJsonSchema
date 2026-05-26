@@ -44,10 +44,11 @@ public class SourceGeneratorTests(ITestOutputHelper output)
         personType.GetProperty("Name")!.SetValue(instance, "Ada");
         personType.GetProperty("Age")!.SetValue(instance, 36);
 
-        var formatter = asm.GetType("MyApp.PersonFormatter")!;
-        var optsType = asm.GetType("MyApp.NoJsonSerializerOptions")!;
-        var serialize = formatter.GetMethod("SerializeToUtf8Bytes",
-            BindingFlags.Public | BindingFlags.Static, null, [personType, optsType], null)!;
+        // Serializer is the public dispatch surface; Formatter is internal-by-design.
+        var serializerType = asm.GetType("MyApp.MyAppSerializer")!;
+        var serialize = serializerType.GetMethods()
+            .First(m => m.Name == "SerializeToUtf8Bytes" && m.IsGenericMethodDefinition)
+            .MakeGenericMethod(personType);
         var bytes = (byte[])serialize.Invoke(null, [instance, null])!;
         Assert.Equal("{\"name\":\"Ada\",\"age\":36}", Encoding.UTF8.GetString(bytes));
     }

@@ -6,28 +6,15 @@ using System.Buffers;
 
 namespace Dap;
 
-public static partial class RunInTerminalRequestArgumentsKindFormatter
+static partial class RunInTerminalRequestArgumentsKindFormatter
 {
     static global::System.ReadOnlySpan<byte> Member_Integrated => "integrated"u8;
     static global::System.ReadOnlySpan<byte> Member_External => "external"u8;
     
-    public static RunInTerminalRequestArgumentsKind Deserialize(global::System.ReadOnlySpan<byte> utf8Json, NoJsonSerializerOptions? options = null)
+    public static RunInTerminalRequestArgumentsKind Deserialize(global::System.ReadOnlySpan<byte> utf8Json, NoJsonSerializerOptions options)
     {
         var tokenizer = new Utf8JsonTokenizer(utf8Json);
         return ReadValue(ref tokenizer);
-    }
-    
-    public static RunInTerminalRequestArgumentsKind Deserialize(byte[] utf8Json, NoJsonSerializerOptions? options = null) => Deserialize((global::System.ReadOnlySpan<byte>)utf8Json, options);
-    
-    public static RunInTerminalRequestArgumentsKind Deserialize(global::System.IO.Stream stream, NoJsonSerializerOptions? options = null)
-    {
-        return Deserialize(NoJsonStreamUtility.ReadAllBytes(stream), options);
-    }
-    
-    public static async global::System.Threading.Tasks.ValueTask<RunInTerminalRequestArgumentsKind> DeserializeAsync(global::System.IO.Stream stream, NoJsonSerializerOptions? options = null, global::System.Threading.CancellationToken cancellationToken = default)
-    {
-        var __bytes = await NoJsonStreamUtility.ReadAllBytesAsync(stream, cancellationToken).ConfigureAwait(false);
-        return Deserialize(__bytes, options);
     }
     
     internal static RunInTerminalRequestArgumentsKind ReadValue(ref Utf8JsonTokenizer tokenizer)
@@ -43,32 +30,11 @@ public static partial class RunInTerminalRequestArgumentsKindFormatter
         return default; // unreachable
     }
     
-    public static void Serialize(global::System.Buffers.IBufferWriter<byte> writer, RunInTerminalRequestArgumentsKind value, NoJsonSerializerOptions? options = null)
+    public static void Serialize(global::System.Buffers.IBufferWriter<byte> writer, in RunInTerminalRequestArgumentsKind value, NoJsonSerializerOptions options)
     {
         var w = new Utf8JsonBufferWriter(writer);
         WriteValue(ref w, value);
         w.Flush();
-    }
-    
-    public static byte[] SerializeToUtf8Bytes(RunInTerminalRequestArgumentsKind value, NoJsonSerializerOptions? options = null)
-    {
-        var buffer = new global::System.Buffers.ArrayBufferWriter<byte>(16);
-        Serialize(buffer, value, options);
-        return buffer.WrittenSpan.ToArray();
-    }
-    
-    public static void Serialize(global::System.IO.Stream stream, RunInTerminalRequestArgumentsKind value, NoJsonSerializerOptions? options = null)
-    {
-        var __buffer = new global::System.Buffers.ArrayBufferWriter<byte>(16);
-        Serialize(__buffer, value, options);
-        stream.Write(__buffer.WrittenSpan);
-    }
-    
-    public static async global::System.Threading.Tasks.ValueTask SerializeAsync(global::System.IO.Stream stream, RunInTerminalRequestArgumentsKind value, NoJsonSerializerOptions? options = null, global::System.Threading.CancellationToken cancellationToken = default)
-    {
-        var __buffer = new global::System.Buffers.ArrayBufferWriter<byte>(16);
-        Serialize(__buffer, value, options);
-        await stream.WriteAsync(__buffer.WrittenMemory, cancellationToken).ConfigureAwait(false);
     }
     
     internal static void WriteValue(ref Utf8JsonBufferWriter w, RunInTerminalRequestArgumentsKind value)
@@ -80,17 +46,4 @@ public static partial class RunInTerminalRequestArgumentsKindFormatter
             default: throw new global::System.InvalidOperationException("Unknown RunInTerminalRequestArgumentsKind value: " + value);
         }
     }
-}
-
-sealed class RunInTerminalRequestArgumentsKindFormatterAdapter : INoJsonFormatter<RunInTerminalRequestArgumentsKind>
-{
-    public static readonly RunInTerminalRequestArgumentsKindFormatterAdapter Instance = new();
-    RunInTerminalRequestArgumentsKindFormatterAdapter() { }
-    
-    public RunInTerminalRequestArgumentsKind Deserialize(global::System.ReadOnlySpan<byte> utf8Json, NoJsonSerializerOptions options) => RunInTerminalRequestArgumentsKindFormatter.Deserialize(utf8Json, options);
-    public void Serialize(global::System.Buffers.IBufferWriter<byte> writer, in RunInTerminalRequestArgumentsKind value, NoJsonSerializerOptions options) => RunInTerminalRequestArgumentsKindFormatter.Serialize(writer, value, options);
-    public RunInTerminalRequestArgumentsKind Deserialize(global::System.IO.Stream stream, NoJsonSerializerOptions options) => RunInTerminalRequestArgumentsKindFormatter.Deserialize(stream, options);
-    public void Serialize(global::System.IO.Stream stream, in RunInTerminalRequestArgumentsKind value, NoJsonSerializerOptions options) => RunInTerminalRequestArgumentsKindFormatter.Serialize(stream, value, options);
-    public global::System.Threading.Tasks.ValueTask<RunInTerminalRequestArgumentsKind> DeserializeAsync(global::System.IO.Stream stream, NoJsonSerializerOptions options, global::System.Threading.CancellationToken cancellationToken) => RunInTerminalRequestArgumentsKindFormatter.DeserializeAsync(stream, options, cancellationToken);
-    public global::System.Threading.Tasks.ValueTask SerializeAsync(global::System.IO.Stream stream, RunInTerminalRequestArgumentsKind value, NoJsonSerializerOptions options, global::System.Threading.CancellationToken cancellationToken) => RunInTerminalRequestArgumentsKindFormatter.SerializeAsync(stream, value, options, cancellationToken);
 }

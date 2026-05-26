@@ -37,12 +37,12 @@ public partial class OutputEventBody
     /// <summary>
     /// The source location&#39;s line where the output was produced.
     /// </summary>
-    public long? Line { get; set; }
+    public ulong? Line { get; set; }
     
     /// <summary>
     /// The position in `line` where the output was produced. It is measured in UTF-16 code units and the client capability `columnsStartAt1` determines whether it is 0- or 1-based.
     /// </summary>
-    public long? Column { get; set; }
+    public ulong? Column { get; set; }
     
     /// <summary>
     /// Additional data to report. For the `telemetry` category the data is sent to telemetry, for the other categories the data is shown in JSON format.

@@ -16,5 +16,5 @@ public partial class ModulesArguments
     /// <summary>
     /// The number of modules to return. If `moduleCount` is not specified or 0, all modules are returned.
     /// </summary>
-    public long? ModuleCount { get; set; }
+    public uint? ModuleCount { get; set; }
 }

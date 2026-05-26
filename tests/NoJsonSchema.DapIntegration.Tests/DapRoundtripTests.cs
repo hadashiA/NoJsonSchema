@@ -32,7 +32,7 @@ public class DapRoundtripTests(ITestOutputHelper output)
             },
         };
 
-        var bytes = InitializeRequestFormatter.SerializeToUtf8Bytes(req);
+        var bytes = DapSerializer.SerializeToUtf8Bytes(req);
         var json = Encoding.UTF8.GetString(bytes);
         output.WriteLine(json);
 
@@ -60,8 +60,8 @@ public class DapRoundtripTests(ITestOutputHelper output)
             },
         };
 
-        var bytes = InitializeRequestFormatter.SerializeToUtf8Bytes(req);
-        var roundtrip = InitializeRequestFormatter.Deserialize(bytes);
+        var bytes = DapSerializer.SerializeToUtf8Bytes(req);
+        var roundtrip = DapSerializer.Deserialize<InitializeRequest>(bytes);
 
         Assert.Equal(7, roundtrip.Seq);
         Assert.Equal("request", roundtrip.Type);
@@ -91,7 +91,7 @@ public class DapRoundtripTests(ITestOutputHelper output)
             },
         };
 
-        var bytes = StoppedEventFormatter.SerializeToUtf8Bytes(ev);
+        var bytes = DapSerializer.SerializeToUtf8Bytes(ev);
         var json = Encoding.UTF8.GetString(bytes);
         output.WriteLine(json);
 
@@ -99,7 +99,7 @@ public class DapRoundtripTests(ITestOutputHelper output)
         Assert.Contains("\"threadId\":1", json);
         Assert.Contains("\"hitBreakpointIds\":[101,102]", json);
 
-        var roundtrip = StoppedEventFormatter.Deserialize(bytes);
+        var roundtrip = DapSerializer.Deserialize<StoppedEvent>(bytes);
         Assert.Equal("event", roundtrip.Type);
         Assert.Equal("stopped", roundtrip.EventValue);
         Assert.NotNull(roundtrip.Body);
@@ -139,11 +139,11 @@ public class DapRoundtripTests(ITestOutputHelper output)
                         Column = 1L,
                     },
                 ],
-                TotalFrames = 2L,
+                TotalFrames = 2u,
             },
         };
 
-        var bytes = StackTraceResponseFormatter.SerializeToUtf8Bytes(resp);
+        var bytes = DapSerializer.SerializeToUtf8Bytes(resp);
         var json = Encoding.UTF8.GetString(bytes);
         output.WriteLine(json);
 
@@ -151,7 +151,7 @@ public class DapRoundtripTests(ITestOutputHelper output)
         Assert.Contains("\"Program.Main\"", json);
         Assert.Contains("\"path\":\"/work/Program.cs\"", json);
 
-        var roundtrip = StackTraceResponseFormatter.Deserialize(bytes);
+        var roundtrip = DapSerializer.Deserialize<StackTraceResponse>(bytes);
         Assert.True(roundtrip.Success);
         Assert.NotNull(roundtrip.Body);
         Assert.Equal(2, roundtrip.Body!.StackFrames.Length);
@@ -165,14 +165,14 @@ public class DapRoundtripTests(ITestOutputHelper output)
         // DAP has a closed enum: ChecksumAlgorithm = { MD5, SHA1, SHA256, "timestamp" }
         // "checksum" inside type Checksum collides with the type name, so the property is renamed ChecksumValue.
         var c = new Checksum { Algorithm = ChecksumAlgorithm.SHA256, ChecksumValue = "abc123" };
-        var bytes = ChecksumFormatter.SerializeToUtf8Bytes(c);
+        var bytes = DapSerializer.SerializeToUtf8Bytes(c);
         var json = Encoding.UTF8.GetString(bytes);
         output.WriteLine(json);
 
         Assert.Contains("\"algorithm\":\"SHA256\"", json);
         Assert.Contains("\"checksum\":\"abc123\"", json);
 
-        var roundtrip = ChecksumFormatter.Deserialize(bytes);
+        var roundtrip = DapSerializer.Deserialize<Checksum>(bytes);
         Assert.Equal(ChecksumAlgorithm.SHA256, roundtrip.Algorithm);
         Assert.Equal("abc123", roundtrip.ChecksumValue);
     }

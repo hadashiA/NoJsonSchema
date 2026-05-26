@@ -40,7 +40,7 @@ public class SerializeBenchmark
     }
 
     [Benchmark]
-    public byte[] NoJsonSchema() => UserFormatter.SerializeToUtf8Bytes(user);
+    public byte[] NoJsonSchema() => NoJsonBenchSerializer.SerializeToUtf8Bytes(user);
 
     [Benchmark(Baseline = true)]
     public byte[] SystemTextJson() => JsonSerializer.SerializeToUtf8Bytes(stj, StjContext.Default.StjUser);

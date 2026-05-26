@@ -39,26 +39,10 @@ public class M6InheritanceTests(ITestOutputHelper output)
     }
 
     static byte[] Serialize(Assembly asm, string ns, string typeName, object value)
-    {
-        var formatter = asm.GetType($"{ns}.{typeName}Formatter")!;
-        var optsType = asm.GetType($"{ns}.NoJsonSerializerOptions")!;
-        var method = formatter.GetMethod("SerializeToUtf8Bytes",
-            BindingFlags.Public | BindingFlags.Static, null,
-            [value.GetType(), optsType], null)
-            ?? throw new InvalidOperationException("SerializeToUtf8Bytes not found");
-        return (byte[])method.Invoke(null, [value, null])!;
-    }
+        => RoundtripReflection.SerializeToUtf8Bytes(asm, ns, asm.GetType($"{ns}.{typeName}")!, value);
 
     static object Deserialize(Assembly asm, string ns, string typeName, byte[] bytes)
-    {
-        var formatter = asm.GetType($"{ns}.{typeName}Formatter")!;
-        var optsType = asm.GetType($"{ns}.NoJsonSerializerOptions")!;
-        var method = formatter.GetMethod("Deserialize",
-            BindingFlags.Public | BindingFlags.Static, null,
-            [typeof(byte[]), optsType], null)
-            ?? throw new InvalidOperationException("Deserialize(byte[]) not found");
-        return method.Invoke(null, [bytes, null])!;
-    }
+        => RoundtripReflection.Deserialize(asm, ns, typeName, bytes);
 
     void Dump(GenerationResult r)
     {

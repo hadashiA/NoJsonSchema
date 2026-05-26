@@ -87,11 +87,7 @@ public class OpenApiRoundtripTests(ITestOutputHelper output)
         bookType.GetProperty("Author")!.SetValue(book, author);
         bookType.GetProperty("Tags")!.SetValue(book, (string[])["math", "algorithms"]);
 
-        var formatter = asm.GetType("BookApi.BookFormatter")!;
-        var optsType = asm.GetType("BookApi.NoJsonSerializerOptions")!;
-        var serialize = formatter.GetMethod("SerializeToUtf8Bytes",
-            BindingFlags.Public | BindingFlags.Static, null, [bookType, optsType], null)!;
-        var bytes = (byte[])serialize.Invoke(null, [book, null])!;
+        var bytes = RoundtripReflection.SerializeToUtf8Bytes(asm, "BookApi", bookType, book);
         var json = Encoding.UTF8.GetString(bytes);
         output.WriteLine(json);
 
@@ -99,9 +95,7 @@ public class OpenApiRoundtripTests(ITestOutputHelper output)
         Assert.Contains("\"name\":\"Knuth\"", json);
         Assert.DoesNotContain("\"nickname\"", json); // SkipNullProperties default
 
-        var deserialize = formatter.GetMethod("Deserialize",
-            BindingFlags.Public | BindingFlags.Static, null, [typeof(byte[]), optsType], null)!;
-        var decoded = deserialize.Invoke(null, [bytes, null])!;
+        var decoded = RoundtripReflection.Deserialize(asm, "BookApi", "Book", bytes);
         var decodedAuthor = bookType.GetProperty("Author")!.GetValue(decoded);
         Assert.Equal("Knuth", authorType.GetProperty("Name")!.GetValue(decodedAuthor));
         Assert.Null(authorType.GetProperty("Nickname")!.GetValue(decodedAuthor));
@@ -139,11 +133,7 @@ public class OpenApiRoundtripTests(ITestOutputHelper output)
         var g = Guid.Parse("00000000-0000-0000-0000-000000000001");
         itemType.GetProperty("Id")!.SetValue(instance, g);
 
-        var formatter = asm.GetType("Items.ItemFormatter")!;
-        var optsType = asm.GetType("Items.NoJsonSerializerOptions")!;
-        var serialize = formatter.GetMethod("SerializeToUtf8Bytes",
-            BindingFlags.Public | BindingFlags.Static, null, [itemType, optsType], null)!;
-        var bytes = (byte[])serialize.Invoke(null, [instance, null])!;
+        var bytes = RoundtripReflection.SerializeToUtf8Bytes(asm, "Items", itemType, instance);
         var json = Encoding.UTF8.GetString(bytes);
         output.WriteLine(json);
         Assert.Contains("\"id\":\"00000000-0000-0000-0000-000000000001\"", json);

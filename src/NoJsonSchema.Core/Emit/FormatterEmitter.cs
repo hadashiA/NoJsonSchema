@@ -18,6 +18,18 @@ public static class FormatterEmitter
             Graph.Types.TryGetValue(name, out var d)
                 && d is ObjectTypeDescriptor obj
                 && obj.Style == TypeStyle.ReadonlyRecordStruct;
+
+        /// <summary>
+        /// Graph-aware extension of <see cref="TypeExpression.IsValueType"/> — recognises named enum
+        /// + struct types in addition to the primitive set. Used to decide whether a property whose
+        /// declared type is <c>T?</c> needs <c>.Value</c> when forwarded to an <c>in T</c> parameter.
+        /// </summary>
+        public bool IsValueTypeReference(TypeRef type) => type switch
+        {
+            TypeRef.Nullable nu => IsValueTypeReference(nu.Inner),
+            TypeRef.Named n => IsEnum(n.Name) || IsStruct(n.Name),
+            _ => TypeExpression.IsValueType(type),
+        };
     }
 
     public static string Emit(ObjectTypeDescriptor type, TypeGraph graph, GenerationOptions options)
@@ -33,25 +45,26 @@ public static class FormatterEmitter
         var formatterName = type.Name + "Formatter";
         var ctx = new EmitContext(graph);
 
+        // The Formatter is a `static partial class` — purely a function bag. Internal-by-default so
+        // it doesn't leak into the user's public surface; the Serializer is the only entry point.
         if (type.Polymorphic is not null)
         {
-            using (w.Block($"public static partial class {NameFactory.EscapeIfReserved(formatterName)}"))
+            using (w.Block($"static partial class {NameFactory.EscapeIfReserved(formatterName)}"))
             {
                 EmitPolymorphicBody(w, type);
             }
-            w.WriteLine();
-            EmitAdapter(w, type.Name, isStruct: false);
             return w.ToString();
         }
 
         var allProps = FlattenProperties(type, graph);
+        var isStruct = type.Style == TypeStyle.ReadonlyRecordStruct;
 
-        using (w.Block($"public static partial class {NameFactory.EscapeIfReserved(formatterName)}"))
+        using (w.Block($"static partial class {NameFactory.EscapeIfReserved(formatterName)}"))
         {
             EmitPropertyNameFields(w, allProps);
             w.WriteLine();
 
-            if (type.Style == TypeStyle.ReadonlyRecordStruct)
+            if (isStruct)
             {
                 EmitStructDeserialize(w, type);
                 w.WriteLine();
@@ -73,46 +86,7 @@ public static class FormatterEmitter
             }
         }
 
-        w.WriteLine();
-        EmitAdapter(w, type.Name, isStruct: type.Style == TypeStyle.ReadonlyRecordStruct);
         return w.ToString();
-    }
-
-    /// <summary>
-    /// Per-type adapter — a sealed singleton implementing <c>INoJsonFormatter&lt;T&gt;</c> that
-    /// forwards to the static Formatter. Lets the namespace-wide <c>Cache&lt;T&gt;</c> pick the
-    /// right impl once per generic instantiation.
-    /// </summary>
-    static void EmitAdapter(SourceWriter w, string typeName, bool isStruct)
-    {
-        var adapter = typeName + "FormatterAdapter";
-        var formatter = typeName + "Formatter";
-        using (w.Block($"sealed class {NameFactory.EscapeIfReserved(adapter)} : INoJsonFormatter<{typeName}>"))
-        {
-            w.WriteLine($"public static readonly {adapter} Instance = new();");
-            w.WriteLine($"{adapter}() {{ }}");
-            w.WriteLine();
-            w.WriteLine($"public {typeName} Deserialize(global::System.ReadOnlySpan<byte> utf8Json, NoJsonSerializerOptions options) => {formatter}.Deserialize(utf8Json, options);");
-            if (isStruct)
-            {
-                w.WriteLine($"public void Serialize(global::System.Buffers.IBufferWriter<byte> writer, in {typeName} value, NoJsonSerializerOptions options) => {formatter}.Serialize(writer, in value, options);");
-            }
-            else
-            {
-                w.WriteLine($"public void Serialize(global::System.Buffers.IBufferWriter<byte> writer, in {typeName} value, NoJsonSerializerOptions options) => {formatter}.Serialize(writer, value, options);");
-            }
-            w.WriteLine($"public {typeName} Deserialize(global::System.IO.Stream stream, NoJsonSerializerOptions options) => {formatter}.Deserialize(stream, options);");
-            if (isStruct)
-            {
-                w.WriteLine($"public void Serialize(global::System.IO.Stream stream, in {typeName} value, NoJsonSerializerOptions options) => {formatter}.Serialize(stream, in value, options);");
-            }
-            else
-            {
-                w.WriteLine($"public void Serialize(global::System.IO.Stream stream, in {typeName} value, NoJsonSerializerOptions options) => {formatter}.Serialize(stream, value, options);");
-            }
-            w.WriteLine($"public global::System.Threading.Tasks.ValueTask<{typeName}> DeserializeAsync(global::System.IO.Stream stream, NoJsonSerializerOptions options, global::System.Threading.CancellationToken cancellationToken) => {formatter}.DeserializeAsync(stream, options, cancellationToken);");
-            w.WriteLine($"public global::System.Threading.Tasks.ValueTask SerializeAsync(global::System.IO.Stream stream, {typeName} value, NoJsonSerializerOptions options, global::System.Threading.CancellationToken cancellationToken) => {formatter}.SerializeAsync(stream, value, options, cancellationToken);");
-        }
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -126,9 +100,8 @@ public static class FormatterEmitter
         w.WriteLine($"static global::System.ReadOnlySpan<byte> DiscriminatorName => {discLiteral};");
         w.WriteLine();
 
-        using (w.Block($"public static {type.Name} Deserialize(global::System.ReadOnlySpan<byte> utf8Json, NoJsonSerializerOptions? options = null)"))
+        using (w.Block($"public static {type.Name} Deserialize(global::System.ReadOnlySpan<byte> utf8Json, NoJsonSerializerOptions options)"))
         {
-            w.WriteLine("options ??= NoJsonSerializerOptions.Default;");
             w.WriteLine("var tokenizer = new Utf8JsonTokenizer(utf8Json);");
             w.WriteLine("tokenizer.ReadStartObject();");
             w.WriteLine($"if (!tokenizer.TryPeekDiscriminator(DiscriminatorName, out var __disc)) tokenizer.ThrowFormatException(\"Missing discriminator '{poly.DiscriminatorJsonName}' on " + type.Name + "\");");
@@ -147,14 +120,8 @@ public static class FormatterEmitter
         }
 
         w.WriteLine();
-        w.WriteLine($"public static {type.Name} Deserialize(byte[] utf8Json, NoJsonSerializerOptions? options = null) => Deserialize((global::System.ReadOnlySpan<byte>)utf8Json, options);");
-        w.WriteLine();
-        EmitStreamDeserialize(w, type.Name);
-        w.WriteLine();
-
-        using (w.Block($"public static void Serialize(global::System.Buffers.IBufferWriter<byte> writer, {type.Name} value, NoJsonSerializerOptions? options = null)"))
+        using (w.Block($"public static void Serialize(global::System.Buffers.IBufferWriter<byte> writer, in {type.Name} value, NoJsonSerializerOptions options)"))
         {
-            w.WriteLine("options ??= NoJsonSerializerOptions.Default;");
             // Plain if-is chain — easier to read at a glance than `switch (value) { case ... }`.
             // JIT folds the type checks just as efficiently for sealed branches.
             foreach (var b in poly.Branches)
@@ -165,19 +132,8 @@ public static class FormatterEmitter
                     w.WriteLine("return;");
                 }
             }
-            w.WriteLine($"throw new global::System.InvalidOperationException(\"Unknown {type.Name} subtype: \" + value.GetType());");
+            w.WriteLine($"throw new global::System.InvalidOperationException(\"Unknown {type.Name} subtype: \" + value!.GetType());");
         }
-
-        w.WriteLine();
-        using (w.Block($"public static byte[] SerializeToUtf8Bytes({type.Name} value, NoJsonSerializerOptions? options = null)"))
-        {
-            w.WriteLine("var buffer = new global::System.Buffers.ArrayBufferWriter<byte>(256);");
-            w.WriteLine("Serialize(buffer, value, options);");
-            w.WriteLine("return buffer.WrittenSpan.ToArray();");
-        }
-
-        w.WriteLine();
-        EmitStreamSerialize(w, type.Name);
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -238,71 +194,13 @@ public static class FormatterEmitter
     static void EmitDeserialize(SourceWriter w, ObjectTypeDescriptor type, GenerationOptions options)
     {
         _ = options;
-        using (w.Block($"public static {type.Name} Deserialize(global::System.ReadOnlySpan<byte> utf8Json, NoJsonSerializerOptions? options = null)"))
+        using (w.Block($"public static {type.Name} Deserialize(global::System.ReadOnlySpan<byte> utf8Json, NoJsonSerializerOptions options)"))
         {
-            w.WriteLine("options ??= NoJsonSerializerOptions.Default;");
             w.WriteLine("var tokenizer = new Utf8JsonTokenizer(utf8Json);");
             w.WriteLine("tokenizer.ReadStartObject();");
             w.WriteLine($"var value = new {type.Name}();");
             w.WriteLine("ReadInto(ref tokenizer, value, options);");
             w.WriteLine("return value;");
-        }
-
-        w.WriteLine();
-        w.WriteLine($"public static {type.Name} Deserialize(byte[] utf8Json, NoJsonSerializerOptions? options = null) => Deserialize((global::System.ReadOnlySpan<byte>)utf8Json, options);");
-        w.WriteLine();
-        EmitStreamDeserialize(w, type.Name);
-    }
-
-    /// <summary>Emit Deserialize(Stream) + DeserializeAsync(Stream, CT) — shared shape across class/enum/polymorphic.</summary>
-    static void EmitStreamDeserialize(SourceWriter w, string typeName)
-    {
-        using (w.Block($"public static {typeName} Deserialize(global::System.IO.Stream stream, NoJsonSerializerOptions? options = null)"))
-        {
-            w.WriteLine("return Deserialize(NoJsonStreamUtility.ReadAllBytes(stream), options);");
-        }
-        w.WriteLine();
-        using (w.Block($"public static async global::System.Threading.Tasks.ValueTask<{typeName}> DeserializeAsync(global::System.IO.Stream stream, NoJsonSerializerOptions? options = null, global::System.Threading.CancellationToken cancellationToken = default)"))
-        {
-            w.WriteLine("var __bytes = await NoJsonStreamUtility.ReadAllBytesAsync(stream, cancellationToken).ConfigureAwait(false);");
-            w.WriteLine("return Deserialize(__bytes, options);");
-        }
-    }
-
-    /// <summary>Emit Serialize(Stream, T) + SerializeAsync — for class / polymorphic (by-value).</summary>
-    static void EmitStreamSerialize(SourceWriter w, string typeName)
-    {
-        using (w.Block($"public static void Serialize(global::System.IO.Stream stream, {typeName} value, NoJsonSerializerOptions? options = null)"))
-        {
-            w.WriteLine("var __buffer = new global::System.Buffers.ArrayBufferWriter<byte>(256);");
-            w.WriteLine("Serialize(__buffer, value, options);");
-            w.WriteLine("stream.Write(__buffer.WrittenSpan);");
-        }
-        w.WriteLine();
-        using (w.Block($"public static async global::System.Threading.Tasks.ValueTask SerializeAsync(global::System.IO.Stream stream, {typeName} value, NoJsonSerializerOptions? options = null, global::System.Threading.CancellationToken cancellationToken = default)"))
-        {
-            w.WriteLine("var __buffer = new global::System.Buffers.ArrayBufferWriter<byte>(256);");
-            w.WriteLine("Serialize(__buffer, value, options);");
-            w.WriteLine("await stream.WriteAsync(__buffer.WrittenMemory, cancellationToken).ConfigureAwait(false);");
-        }
-    }
-
-    /// <summary>Emit Serialize(Stream, in T) + SerializeAsync(Stream, T) — for value-object structs.</summary>
-    static void EmitStreamSerializeForStruct(SourceWriter w, string typeName)
-    {
-        using (w.Block($"public static void Serialize(global::System.IO.Stream stream, in {typeName} value, NoJsonSerializerOptions? options = null)"))
-        {
-            w.WriteLine("var __buffer = new global::System.Buffers.ArrayBufferWriter<byte>(256);");
-            w.WriteLine("Serialize(__buffer, in value, options);");
-            w.WriteLine("stream.Write(__buffer.WrittenSpan);");
-        }
-        w.WriteLine();
-        // Async methods cannot have `in` parameters; pass by value (a small struct copy is fine).
-        using (w.Block($"public static async global::System.Threading.Tasks.ValueTask SerializeAsync(global::System.IO.Stream stream, {typeName} value, NoJsonSerializerOptions? options = null, global::System.Threading.CancellationToken cancellationToken = default)"))
-        {
-            w.WriteLine("var __buffer = new global::System.Buffers.ArrayBufferWriter<byte>(256);");
-            w.WriteLine("Serialize(__buffer, in value, options);");
-            w.WriteLine("await stream.WriteAsync(__buffer.WrittenMemory, cancellationToken).ConfigureAwait(false);");
         }
     }
 
@@ -549,24 +447,12 @@ public static class FormatterEmitter
     static void EmitSerialize(SourceWriter w, ObjectTypeDescriptor type, GenerationOptions options)
     {
         _ = options;
-        using (w.Block($"public static void Serialize(global::System.Buffers.IBufferWriter<byte> writer, {type.Name} value, NoJsonSerializerOptions? options = null)"))
+        using (w.Block($"public static void Serialize(global::System.Buffers.IBufferWriter<byte> writer, in {type.Name} value, NoJsonSerializerOptions options)"))
         {
-            w.WriteLine("options ??= NoJsonSerializerOptions.Default;");
             w.WriteLine("var w = new Utf8JsonBufferWriter(writer);");
             w.WriteLine("WriteValue(ref w, value, options);");
             w.WriteLine("w.Flush();");
         }
-
-        w.WriteLine();
-        using (w.Block($"public static byte[] SerializeToUtf8Bytes({type.Name} value, NoJsonSerializerOptions? options = null)"))
-        {
-            w.WriteLine("var buffer = new global::System.Buffers.ArrayBufferWriter<byte>(256);");
-            w.WriteLine("Serialize(buffer, value, options);");
-            w.WriteLine("return buffer.WrittenSpan.ToArray();");
-        }
-
-        w.WriteLine();
-        EmitStreamSerialize(w, type.Name);
     }
 
     static void EmitWriteValue(SourceWriter w, ObjectTypeDescriptor type, IReadOnlyList<PropertyDescriptor> properties, GenerationOptions options, EmitContext ctx)
@@ -603,7 +489,11 @@ public static class FormatterEmitter
             using (w.BraceBlock())
             {
                 w.WriteLine($"w.WritePropertyNameRaw(Name_{p.Name});");
-                var forceUnwrap = TypeExpression.IsValueType(inner) || (inner is TypeRef.Named n && ctx.IsEnum(n.Name));
+                // The accessor has type T? for the optional/nullable case. When T is a value type
+                // (primitive, enum, OR a value-object struct from the graph), we must call `.Value`
+                // before forwarding to an `in T` parameter; for reference T the null-branch above
+                // already returned, so the property is non-null at this point.
+                var forceUnwrap = ctx.IsValueTypeReference(inner);
                 EmitWriteCoreValue(w, p, inner, accessor: $"value.{p.Name}", forceUnwrap: forceUnwrap, ctx);
             }
         }
@@ -687,12 +577,13 @@ public static class FormatterEmitter
 
     static void EmitWriteElementCore(SourceWriter w, TypeRef inner, EmitContext ctx, string accessor, bool unwrapValue)
     {
-        // When the original element was Nullable<T> for a value type, callers need .Value to unwrap;
-        // for reference types we use the non-null assertion since the null branch already returned.
+        // When the original element was Nullable<T> for a value type (primitive, enum, or value-
+        // object struct), callers need `.Value` to unwrap; for reference types we use the non-null
+        // assertion since the null branch already returned.
         string read;
         if (unwrapValue)
         {
-            read = TypeExpression.IsValueType(inner) ? accessor + ".Value" : accessor + "!";
+            read = ctx.IsValueTypeReference(inner) ? accessor + ".Value" : accessor + "!";
         }
         else
         {
@@ -751,18 +642,12 @@ public static class FormatterEmitter
 
     static void EmitStructDeserialize(SourceWriter w, ObjectTypeDescriptor type)
     {
-        using (w.Block($"public static {type.Name} Deserialize(global::System.ReadOnlySpan<byte> utf8Json, NoJsonSerializerOptions? options = null)"))
+        using (w.Block($"public static {type.Name} Deserialize(global::System.ReadOnlySpan<byte> utf8Json, NoJsonSerializerOptions options)"))
         {
-            w.WriteLine("options ??= NoJsonSerializerOptions.Default;");
             w.WriteLine("var tokenizer = new Utf8JsonTokenizer(utf8Json);");
             w.WriteLine("tokenizer.ReadStartObject();");
             w.WriteLine("return ReadValue(ref tokenizer, options);");
         }
-
-        w.WriteLine();
-        w.WriteLine($"public static {type.Name} Deserialize(byte[] utf8Json, NoJsonSerializerOptions? options = null) => Deserialize((global::System.ReadOnlySpan<byte>)utf8Json, options);");
-        w.WriteLine();
-        EmitStreamDeserialize(w, type.Name);
     }
 
     static void EmitStructReadValue(SourceWriter w, ObjectTypeDescriptor type, IReadOnlyList<PropertyDescriptor> properties, EmitContext ctx)
@@ -911,24 +796,12 @@ public static class FormatterEmitter
 
     static void EmitStructSerialize(SourceWriter w, ObjectTypeDescriptor type)
     {
-        using (w.Block($"public static void Serialize(global::System.Buffers.IBufferWriter<byte> writer, in {type.Name} value, NoJsonSerializerOptions? options = null)"))
+        using (w.Block($"public static void Serialize(global::System.Buffers.IBufferWriter<byte> writer, in {type.Name} value, NoJsonSerializerOptions options)"))
         {
-            w.WriteLine("options ??= NoJsonSerializerOptions.Default;");
             w.WriteLine("var w = new Utf8JsonBufferWriter(writer);");
             w.WriteLine("WriteValue(ref w, in value, options);");
             w.WriteLine("w.Flush();");
         }
-
-        w.WriteLine();
-        using (w.Block($"public static byte[] SerializeToUtf8Bytes(in {type.Name} value, NoJsonSerializerOptions? options = null)"))
-        {
-            w.WriteLine("var buffer = new global::System.Buffers.ArrayBufferWriter<byte>(256);");
-            w.WriteLine("Serialize(buffer, in value, options);");
-            w.WriteLine("return buffer.WrittenSpan.ToArray();");
-        }
-
-        w.WriteLine();
-        EmitStreamSerializeForStruct(w, type.Name);
     }
 
     static void EmitStructWriteValue(SourceWriter w, ObjectTypeDescriptor type, IReadOnlyList<PropertyDescriptor> properties, EmitContext ctx)

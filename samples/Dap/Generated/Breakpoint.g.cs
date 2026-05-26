@@ -32,23 +32,23 @@ public partial class Breakpoint
     /// <summary>
     /// The start line of the actual range covered by the breakpoint.
     /// </summary>
-    public long? Line { get; set; }
+    public ulong? Line { get; set; }
     
     /// <summary>
     /// Start position of the source range covered by the breakpoint. It is measured in UTF-16 code units and the client capability `columnsStartAt1` determines whether it is 0- or 1-based.
     /// </summary>
-    public long? Column { get; set; }
+    public ulong? Column { get; set; }
     
     /// <summary>
     /// The end line of the actual range covered by the breakpoint.
     /// </summary>
-    public long? EndLine { get; set; }
+    public ulong? EndLine { get; set; }
     
     /// <summary>
     /// End position of the source range covered by the breakpoint. It is measured in UTF-16 code units and the client capability `columnsStartAt1` determines whether it is 0- or 1-based.
     /// If no end line is given, then the end column is assumed to be in the start line.
     /// </summary>
-    public long? EndColumn { get; set; }
+    public ulong? EndColumn { get; set; }
     
     /// <summary>
     /// A memory reference to where the breakpoint is set.

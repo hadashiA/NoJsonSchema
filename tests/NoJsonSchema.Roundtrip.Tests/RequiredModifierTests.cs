@@ -78,11 +78,7 @@ public class RequiredModifierTests(ITestOutputHelper output)
         personType.GetProperty("Name")!.SetValue(instance, "Ada");
         personType.GetProperty("Age")!.SetValue(instance, 36);
 
-        var formatter = asm.GetType("PersonDefault.PersonFormatter")!;
-        var optsType = asm.GetType("PersonDefault.NoJsonSerializerOptions")!;
-        var serialize = formatter.GetMethod("SerializeToUtf8Bytes",
-            BindingFlags.Public | BindingFlags.Static, null, [personType, optsType], null)!;
-        var bytes = (byte[])serialize.Invoke(null, [instance, null])!;
+        var bytes = RoundtripReflection.SerializeToUtf8Bytes(asm, "PersonDefault", personType, instance);
         Assert.Equal("{\"name\":\"Ada\",\"age\":36}", Encoding.UTF8.GetString(bytes));
     }
 
@@ -107,16 +103,10 @@ public class RequiredModifierTests(ITestOutputHelper output)
         personType.GetProperty("Name")!.SetValue(instance, "Grace");
         personType.GetProperty("Age")!.SetValue(instance, 85);
 
-        var formatter = asm.GetType("PersonReq.PersonFormatter")!;
-        var optsType = asm.GetType("PersonReq.NoJsonSerializerOptions")!;
-        var serialize = formatter.GetMethod("SerializeToUtf8Bytes",
-            BindingFlags.Public | BindingFlags.Static, null, [personType, optsType], null)!;
-        var bytes = (byte[])serialize.Invoke(null, [instance, null])!;
+        var bytes = RoundtripReflection.SerializeToUtf8Bytes(asm, "PersonReq", personType, instance);
         Assert.Equal("{\"name\":\"Grace\",\"age\":85}", Encoding.UTF8.GetString(bytes));
 
-        var deserialize = formatter.GetMethod("Deserialize",
-            BindingFlags.Public | BindingFlags.Static, null, [typeof(byte[]), optsType], null)!;
-        var decoded = deserialize.Invoke(null, [bytes, null])!;
+        var decoded = RoundtripReflection.Deserialize(asm, "PersonReq", "Person", bytes);
         Assert.Equal("Grace", personType.GetProperty("Name")!.GetValue(decoded));
         Assert.Equal(85, personType.GetProperty("Age")!.GetValue(decoded));
     }

@@ -36,20 +36,20 @@ public partial class CompletionItem
     /// <summary>
     /// Start position (within the `text` attribute of the `completions` request) where the completion text is added. The position is measured in UTF-16 code units and the client capability `columnsStartAt1` determines whether it is 0- or 1-based. If the start position is omitted the text is added at the location specified by the `column` attribute of the `completions` request.
     /// </summary>
-    public long? Start { get; set; }
+    public uint? Start { get; set; }
     
     /// <summary>
     /// Length determines how many characters are overwritten by the completion text and it is measured in UTF-16 code units. If missing the value 0 is assumed which results in the completion text being inserted.
     /// </summary>
-    public long? Length { get; set; }
+    public uint? Length { get; set; }
     
     /// <summary>
     /// Determines the start of the new selection after the text has been inserted (or replaced). `selectionStart` is measured in UTF-16 code units and must be in the range 0 and length of the completion text. If omitted the selection starts at the end of the completion text.
     /// </summary>
-    public long? SelectionStart { get; set; }
+    public uint? SelectionStart { get; set; }
     
     /// <summary>
     /// Determines the length of the new selection after the text has been inserted (or replaced) and it is measured in UTF-16 code units. The selection can not extend beyond the bounds of the completion text. If omitted the length is assumed to be 0.
     /// </summary>
-    public long? SelectionLength { get; set; }
+    public uint? SelectionLength { get; set; }
 }

@@ -38,22 +38,22 @@ public partial class DisassembledInstruction
     /// <summary>
     /// The line within the source location that corresponds to this instruction, if any.
     /// </summary>
-    public long? Line { get; set; }
+    public ulong? Line { get; set; }
     
     /// <summary>
     /// The column within the line that corresponds to this instruction, if any.
     /// </summary>
-    public long? Column { get; set; }
+    public ulong? Column { get; set; }
     
     /// <summary>
     /// The end line of the range that corresponds to this instruction, if any.
     /// </summary>
-    public long? EndLine { get; set; }
+    public ulong? EndLine { get; set; }
     
     /// <summary>
     /// The end column of the range that corresponds to this instruction, if any.
     /// </summary>
-    public long? EndColumn { get; set; }
+    public ulong? EndColumn { get; set; }
     
     /// <summary>
     /// A hint for how to present the instruction in the UI.

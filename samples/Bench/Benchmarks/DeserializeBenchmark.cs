@@ -29,7 +29,7 @@ public class DeserializeBenchmark
     }
 
     [Benchmark]
-    public User NoJsonSchema() => UserFormatter.Deserialize(bytes);
+    public User NoJsonSchema() => NoJsonBenchSerializer.Deserialize<User>(bytes);
 
     [Benchmark(Baseline = true)]
     public StjUser SystemTextJson() => JsonSerializer.Deserialize(bytes, StjContext.Default.StjUser)!;

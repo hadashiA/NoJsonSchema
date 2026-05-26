@@ -6,30 +6,16 @@ using System.Buffers;
 
 namespace Dap;
 
-public static partial class ConfigurationDoneArgumentsFormatter
+static partial class ConfigurationDoneArgumentsFormatter
 {
     
-    public static ConfigurationDoneArguments Deserialize(global::System.ReadOnlySpan<byte> utf8Json, NoJsonSerializerOptions? options = null)
+    public static ConfigurationDoneArguments Deserialize(global::System.ReadOnlySpan<byte> utf8Json, NoJsonSerializerOptions options)
     {
-        options ??= NoJsonSerializerOptions.Default;
         var tokenizer = new Utf8JsonTokenizer(utf8Json);
         tokenizer.ReadStartObject();
         var value = new ConfigurationDoneArguments();
         ReadInto(ref tokenizer, value, options);
         return value;
-    }
-    
-    public static ConfigurationDoneArguments Deserialize(byte[] utf8Json, NoJsonSerializerOptions? options = null) => Deserialize((global::System.ReadOnlySpan<byte>)utf8Json, options);
-    
-    public static ConfigurationDoneArguments Deserialize(global::System.IO.Stream stream, NoJsonSerializerOptions? options = null)
-    {
-        return Deserialize(NoJsonStreamUtility.ReadAllBytes(stream), options);
-    }
-    
-    public static async global::System.Threading.Tasks.ValueTask<ConfigurationDoneArguments> DeserializeAsync(global::System.IO.Stream stream, NoJsonSerializerOptions? options = null, global::System.Threading.CancellationToken cancellationToken = default)
-    {
-        var __bytes = await NoJsonStreamUtility.ReadAllBytesAsync(stream, cancellationToken).ConfigureAwait(false);
-        return Deserialize(__bytes, options);
     }
     
     internal static void ReadInto(ref Utf8JsonTokenizer tokenizer, ConfigurationDoneArguments value, NoJsonSerializerOptions options)
@@ -41,33 +27,11 @@ public static partial class ConfigurationDoneArgumentsFormatter
         }
     }
     
-    public static void Serialize(global::System.Buffers.IBufferWriter<byte> writer, ConfigurationDoneArguments value, NoJsonSerializerOptions? options = null)
+    public static void Serialize(global::System.Buffers.IBufferWriter<byte> writer, in ConfigurationDoneArguments value, NoJsonSerializerOptions options)
     {
-        options ??= NoJsonSerializerOptions.Default;
         var w = new Utf8JsonBufferWriter(writer);
         WriteValue(ref w, value, options);
         w.Flush();
-    }
-    
-    public static byte[] SerializeToUtf8Bytes(ConfigurationDoneArguments value, NoJsonSerializerOptions? options = null)
-    {
-        var buffer = new global::System.Buffers.ArrayBufferWriter<byte>(256);
-        Serialize(buffer, value, options);
-        return buffer.WrittenSpan.ToArray();
-    }
-    
-    public static void Serialize(global::System.IO.Stream stream, ConfigurationDoneArguments value, NoJsonSerializerOptions? options = null)
-    {
-        var __buffer = new global::System.Buffers.ArrayBufferWriter<byte>(256);
-        Serialize(__buffer, value, options);
-        stream.Write(__buffer.WrittenSpan);
-    }
-    
-    public static async global::System.Threading.Tasks.ValueTask SerializeAsync(global::System.IO.Stream stream, ConfigurationDoneArguments value, NoJsonSerializerOptions? options = null, global::System.Threading.CancellationToken cancellationToken = default)
-    {
-        var __buffer = new global::System.Buffers.ArrayBufferWriter<byte>(256);
-        Serialize(__buffer, value, options);
-        await stream.WriteAsync(__buffer.WrittenMemory, cancellationToken).ConfigureAwait(false);
     }
     
     internal static void WriteValue(ref Utf8JsonBufferWriter w, ConfigurationDoneArguments value, NoJsonSerializerOptions options)
@@ -75,17 +39,4 @@ public static partial class ConfigurationDoneArgumentsFormatter
         w.WriteStartObject();
         w.WriteEndObject();
     }
-}
-
-sealed class ConfigurationDoneArgumentsFormatterAdapter : INoJsonFormatter<ConfigurationDoneArguments>
-{
-    public static readonly ConfigurationDoneArgumentsFormatterAdapter Instance = new();
-    ConfigurationDoneArgumentsFormatterAdapter() { }
-    
-    public ConfigurationDoneArguments Deserialize(global::System.ReadOnlySpan<byte> utf8Json, NoJsonSerializerOptions options) => ConfigurationDoneArgumentsFormatter.Deserialize(utf8Json, options);
-    public void Serialize(global::System.Buffers.IBufferWriter<byte> writer, in ConfigurationDoneArguments value, NoJsonSerializerOptions options) => ConfigurationDoneArgumentsFormatter.Serialize(writer, value, options);
-    public ConfigurationDoneArguments Deserialize(global::System.IO.Stream stream, NoJsonSerializerOptions options) => ConfigurationDoneArgumentsFormatter.Deserialize(stream, options);
-    public void Serialize(global::System.IO.Stream stream, in ConfigurationDoneArguments value, NoJsonSerializerOptions options) => ConfigurationDoneArgumentsFormatter.Serialize(stream, value, options);
-    public global::System.Threading.Tasks.ValueTask<ConfigurationDoneArguments> DeserializeAsync(global::System.IO.Stream stream, NoJsonSerializerOptions options, global::System.Threading.CancellationToken cancellationToken) => ConfigurationDoneArgumentsFormatter.DeserializeAsync(stream, options, cancellationToken);
-    public global::System.Threading.Tasks.ValueTask SerializeAsync(global::System.IO.Stream stream, ConfigurationDoneArguments value, NoJsonSerializerOptions options, global::System.Threading.CancellationToken cancellationToken) => ConfigurationDoneArgumentsFormatter.SerializeAsync(stream, value, options, cancellationToken);
 }

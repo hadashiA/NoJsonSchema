@@ -21,7 +21,7 @@ public partial class SetBreakpointsArguments
     /// <summary>
     /// Deprecated: The code locations of the breakpoints.
     /// </summary>
-    public long[]? Lines { get; set; }
+    public ulong[]? Lines { get; set; }
     
     /// <summary>
     /// A value of true indicates that the underlying source has been modified which results in new breakpoint locations.

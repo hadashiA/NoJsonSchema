@@ -18,5 +18,5 @@ public partial class MemoryEventBody
     /// <summary>
     /// Number of bytes updated.
     /// </summary>
-    public long Count { get; set; }
+    public ulong Count { get; set; }
 }

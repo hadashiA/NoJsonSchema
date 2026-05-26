@@ -27,12 +27,12 @@ static class SanityCheck
             Tags = ["x", "y"], Scores = [1, 2, 3],
         };
 
-        var njs = Encoding.UTF8.GetString(UserFormatter.SerializeToUtf8Bytes(u));
+        var njs = Encoding.UTF8.GetString(NoJsonBenchSerializer.SerializeToUtf8Bytes(u));
         var stj = Encoding.UTF8.GetString(JsonSerializer.SerializeToUtf8Bytes(s, StjContext.Default.StjUser));
         Console.WriteLine("NoJsonSchema: " + njs);
         Console.WriteLine("STJ        : " + stj);
 
-        var njsBack = UserFormatter.Deserialize((ReadOnlySpan<byte>)Encoding.UTF8.GetBytes(njs));
+        var njsBack = NoJsonBenchSerializer.Deserialize<User>(Encoding.UTF8.GetBytes(njs));
         var stjBack = JsonSerializer.Deserialize(stj, StjContext.Default.StjUser);
         Console.WriteLine($"NJS  decode: id={njsBack.Id}, addr.city={njsBack.Address?.City}");
         Console.WriteLine($"STJ  decode: id={stjBack!.Id}, addr.city={stjBack.Address?.City}");

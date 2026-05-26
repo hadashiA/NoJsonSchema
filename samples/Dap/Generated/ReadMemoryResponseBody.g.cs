@@ -15,7 +15,7 @@ public partial class ReadMemoryResponseBody
     /// The number of unreadable bytes encountered after the last successfully read byte.
     /// This can be used to determine the number of bytes that should be skipped before a subsequent `readMemory` request succeeds.
     /// </summary>
-    public long? UnreadableBytes { get; set; }
+    public ulong? UnreadableBytes { get; set; }
     
     /// <summary>
     /// The bytes read from memory, encoded using base64. If the decoded length of `data` is less than the requested `count` in the original `readMemory` request, and `unreadableBytes` is zero or omitted, then the client should assume it&#39;s reached the end of readable memory.

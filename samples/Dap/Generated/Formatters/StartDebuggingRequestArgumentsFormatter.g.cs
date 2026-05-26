@@ -6,33 +6,19 @@ using System.Buffers;
 
 namespace Dap;
 
-public static partial class StartDebuggingRequestArgumentsFormatter
+static partial class StartDebuggingRequestArgumentsFormatter
 {
     static global::System.ReadOnlySpan<byte> Name_Configuration => "\"configuration\":"u8;
     static global::System.ReadOnlySpan<byte> Name_OutputPresentation => "\"outputPresentation\":"u8;
     static global::System.ReadOnlySpan<byte> Name_Request => "\"request\":"u8;
     
-    public static StartDebuggingRequestArguments Deserialize(global::System.ReadOnlySpan<byte> utf8Json, NoJsonSerializerOptions? options = null)
+    public static StartDebuggingRequestArguments Deserialize(global::System.ReadOnlySpan<byte> utf8Json, NoJsonSerializerOptions options)
     {
-        options ??= NoJsonSerializerOptions.Default;
         var tokenizer = new Utf8JsonTokenizer(utf8Json);
         tokenizer.ReadStartObject();
         var value = new StartDebuggingRequestArguments();
         ReadInto(ref tokenizer, value, options);
         return value;
-    }
-    
-    public static StartDebuggingRequestArguments Deserialize(byte[] utf8Json, NoJsonSerializerOptions? options = null) => Deserialize((global::System.ReadOnlySpan<byte>)utf8Json, options);
-    
-    public static StartDebuggingRequestArguments Deserialize(global::System.IO.Stream stream, NoJsonSerializerOptions? options = null)
-    {
-        return Deserialize(NoJsonStreamUtility.ReadAllBytes(stream), options);
-    }
-    
-    public static async global::System.Threading.Tasks.ValueTask<StartDebuggingRequestArguments> DeserializeAsync(global::System.IO.Stream stream, NoJsonSerializerOptions? options = null, global::System.Threading.CancellationToken cancellationToken = default)
-    {
-        var __bytes = await NoJsonStreamUtility.ReadAllBytesAsync(stream, cancellationToken).ConfigureAwait(false);
-        return Deserialize(__bytes, options);
     }
     
     internal static void ReadInto(ref Utf8JsonTokenizer tokenizer, StartDebuggingRequestArguments value, NoJsonSerializerOptions options)
@@ -103,33 +89,11 @@ public static partial class StartDebuggingRequestArgumentsFormatter
         }
     }
     
-    public static void Serialize(global::System.Buffers.IBufferWriter<byte> writer, StartDebuggingRequestArguments value, NoJsonSerializerOptions? options = null)
+    public static void Serialize(global::System.Buffers.IBufferWriter<byte> writer, in StartDebuggingRequestArguments value, NoJsonSerializerOptions options)
     {
-        options ??= NoJsonSerializerOptions.Default;
         var w = new Utf8JsonBufferWriter(writer);
         WriteValue(ref w, value, options);
         w.Flush();
-    }
-    
-    public static byte[] SerializeToUtf8Bytes(StartDebuggingRequestArguments value, NoJsonSerializerOptions? options = null)
-    {
-        var buffer = new global::System.Buffers.ArrayBufferWriter<byte>(256);
-        Serialize(buffer, value, options);
-        return buffer.WrittenSpan.ToArray();
-    }
-    
-    public static void Serialize(global::System.IO.Stream stream, StartDebuggingRequestArguments value, NoJsonSerializerOptions? options = null)
-    {
-        var __buffer = new global::System.Buffers.ArrayBufferWriter<byte>(256);
-        Serialize(__buffer, value, options);
-        stream.Write(__buffer.WrittenSpan);
-    }
-    
-    public static async global::System.Threading.Tasks.ValueTask SerializeAsync(global::System.IO.Stream stream, StartDebuggingRequestArguments value, NoJsonSerializerOptions? options = null, global::System.Threading.CancellationToken cancellationToken = default)
-    {
-        var __buffer = new global::System.Buffers.ArrayBufferWriter<byte>(256);
-        Serialize(__buffer, value, options);
-        await stream.WriteAsync(__buffer.WrittenMemory, cancellationToken).ConfigureAwait(false);
     }
     
     internal static void WriteValue(ref Utf8JsonBufferWriter w, StartDebuggingRequestArguments value, NoJsonSerializerOptions options)
@@ -163,17 +127,4 @@ public static partial class StartDebuggingRequestArgumentsFormatter
         StartDebuggingRequestArgumentsRequestFormatter.WriteValue(ref w, value.Request);
         w.WriteEndObject();
     }
-}
-
-sealed class StartDebuggingRequestArgumentsFormatterAdapter : INoJsonFormatter<StartDebuggingRequestArguments>
-{
-    public static readonly StartDebuggingRequestArgumentsFormatterAdapter Instance = new();
-    StartDebuggingRequestArgumentsFormatterAdapter() { }
-    
-    public StartDebuggingRequestArguments Deserialize(global::System.ReadOnlySpan<byte> utf8Json, NoJsonSerializerOptions options) => StartDebuggingRequestArgumentsFormatter.Deserialize(utf8Json, options);
-    public void Serialize(global::System.Buffers.IBufferWriter<byte> writer, in StartDebuggingRequestArguments value, NoJsonSerializerOptions options) => StartDebuggingRequestArgumentsFormatter.Serialize(writer, value, options);
-    public StartDebuggingRequestArguments Deserialize(global::System.IO.Stream stream, NoJsonSerializerOptions options) => StartDebuggingRequestArgumentsFormatter.Deserialize(stream, options);
-    public void Serialize(global::System.IO.Stream stream, in StartDebuggingRequestArguments value, NoJsonSerializerOptions options) => StartDebuggingRequestArgumentsFormatter.Serialize(stream, value, options);
-    public global::System.Threading.Tasks.ValueTask<StartDebuggingRequestArguments> DeserializeAsync(global::System.IO.Stream stream, NoJsonSerializerOptions options, global::System.Threading.CancellationToken cancellationToken) => StartDebuggingRequestArgumentsFormatter.DeserializeAsync(stream, options, cancellationToken);
-    public global::System.Threading.Tasks.ValueTask SerializeAsync(global::System.IO.Stream stream, StartDebuggingRequestArguments value, NoJsonSerializerOptions options, global::System.Threading.CancellationToken cancellationToken) => StartDebuggingRequestArgumentsFormatter.SerializeAsync(stream, value, options, cancellationToken);
 }

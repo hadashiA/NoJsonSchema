@@ -6,30 +6,17 @@ using System.Buffers;
 
 namespace Dap;
 
-public static partial class ChecksumAlgorithmFormatter
+static partial class ChecksumAlgorithmFormatter
 {
     static global::System.ReadOnlySpan<byte> Member_MD5 => "MD5"u8;
     static global::System.ReadOnlySpan<byte> Member_SHA1 => "SHA1"u8;
     static global::System.ReadOnlySpan<byte> Member_SHA256 => "SHA256"u8;
     static global::System.ReadOnlySpan<byte> Member_Timestamp => "timestamp"u8;
     
-    public static ChecksumAlgorithm Deserialize(global::System.ReadOnlySpan<byte> utf8Json, NoJsonSerializerOptions? options = null)
+    public static ChecksumAlgorithm Deserialize(global::System.ReadOnlySpan<byte> utf8Json, NoJsonSerializerOptions options)
     {
         var tokenizer = new Utf8JsonTokenizer(utf8Json);
         return ReadValue(ref tokenizer);
-    }
-    
-    public static ChecksumAlgorithm Deserialize(byte[] utf8Json, NoJsonSerializerOptions? options = null) => Deserialize((global::System.ReadOnlySpan<byte>)utf8Json, options);
-    
-    public static ChecksumAlgorithm Deserialize(global::System.IO.Stream stream, NoJsonSerializerOptions? options = null)
-    {
-        return Deserialize(NoJsonStreamUtility.ReadAllBytes(stream), options);
-    }
-    
-    public static async global::System.Threading.Tasks.ValueTask<ChecksumAlgorithm> DeserializeAsync(global::System.IO.Stream stream, NoJsonSerializerOptions? options = null, global::System.Threading.CancellationToken cancellationToken = default)
-    {
-        var __bytes = await NoJsonStreamUtility.ReadAllBytesAsync(stream, cancellationToken).ConfigureAwait(false);
-        return Deserialize(__bytes, options);
     }
     
     internal static ChecksumAlgorithm ReadValue(ref Utf8JsonTokenizer tokenizer)
@@ -47,32 +34,11 @@ public static partial class ChecksumAlgorithmFormatter
         return default; // unreachable
     }
     
-    public static void Serialize(global::System.Buffers.IBufferWriter<byte> writer, ChecksumAlgorithm value, NoJsonSerializerOptions? options = null)
+    public static void Serialize(global::System.Buffers.IBufferWriter<byte> writer, in ChecksumAlgorithm value, NoJsonSerializerOptions options)
     {
         var w = new Utf8JsonBufferWriter(writer);
         WriteValue(ref w, value);
         w.Flush();
-    }
-    
-    public static byte[] SerializeToUtf8Bytes(ChecksumAlgorithm value, NoJsonSerializerOptions? options = null)
-    {
-        var buffer = new global::System.Buffers.ArrayBufferWriter<byte>(16);
-        Serialize(buffer, value, options);
-        return buffer.WrittenSpan.ToArray();
-    }
-    
-    public static void Serialize(global::System.IO.Stream stream, ChecksumAlgorithm value, NoJsonSerializerOptions? options = null)
-    {
-        var __buffer = new global::System.Buffers.ArrayBufferWriter<byte>(16);
-        Serialize(__buffer, value, options);
-        stream.Write(__buffer.WrittenSpan);
-    }
-    
-    public static async global::System.Threading.Tasks.ValueTask SerializeAsync(global::System.IO.Stream stream, ChecksumAlgorithm value, NoJsonSerializerOptions? options = null, global::System.Threading.CancellationToken cancellationToken = default)
-    {
-        var __buffer = new global::System.Buffers.ArrayBufferWriter<byte>(16);
-        Serialize(__buffer, value, options);
-        await stream.WriteAsync(__buffer.WrittenMemory, cancellationToken).ConfigureAwait(false);
     }
     
     internal static void WriteValue(ref Utf8JsonBufferWriter w, ChecksumAlgorithm value)
@@ -86,17 +52,4 @@ public static partial class ChecksumAlgorithmFormatter
             default: throw new global::System.InvalidOperationException("Unknown ChecksumAlgorithm value: " + value);
         }
     }
-}
-
-sealed class ChecksumAlgorithmFormatterAdapter : INoJsonFormatter<ChecksumAlgorithm>
-{
-    public static readonly ChecksumAlgorithmFormatterAdapter Instance = new();
-    ChecksumAlgorithmFormatterAdapter() { }
-    
-    public ChecksumAlgorithm Deserialize(global::System.ReadOnlySpan<byte> utf8Json, NoJsonSerializerOptions options) => ChecksumAlgorithmFormatter.Deserialize(utf8Json, options);
-    public void Serialize(global::System.Buffers.IBufferWriter<byte> writer, in ChecksumAlgorithm value, NoJsonSerializerOptions options) => ChecksumAlgorithmFormatter.Serialize(writer, value, options);
-    public ChecksumAlgorithm Deserialize(global::System.IO.Stream stream, NoJsonSerializerOptions options) => ChecksumAlgorithmFormatter.Deserialize(stream, options);
-    public void Serialize(global::System.IO.Stream stream, in ChecksumAlgorithm value, NoJsonSerializerOptions options) => ChecksumAlgorithmFormatter.Serialize(stream, value, options);
-    public global::System.Threading.Tasks.ValueTask<ChecksumAlgorithm> DeserializeAsync(global::System.IO.Stream stream, NoJsonSerializerOptions options, global::System.Threading.CancellationToken cancellationToken) => ChecksumAlgorithmFormatter.DeserializeAsync(stream, options, cancellationToken);
-    public global::System.Threading.Tasks.ValueTask SerializeAsync(global::System.IO.Stream stream, ChecksumAlgorithm value, NoJsonSerializerOptions options, global::System.Threading.CancellationToken cancellationToken) => ChecksumAlgorithmFormatter.SerializeAsync(stream, value, options, cancellationToken);
 }

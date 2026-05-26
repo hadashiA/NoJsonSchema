@@ -6,7 +6,7 @@ using System.Buffers;
 
 namespace Dap;
 
-public static partial class LocationsResponseBodyFormatter
+static partial class LocationsResponseBodyFormatter
 {
     static global::System.ReadOnlySpan<byte> Name_Source => "\"source\":"u8;
     static global::System.ReadOnlySpan<byte> Name_Line => "\"line\":"u8;
@@ -14,27 +14,13 @@ public static partial class LocationsResponseBodyFormatter
     static global::System.ReadOnlySpan<byte> Name_EndLine => "\"endLine\":"u8;
     static global::System.ReadOnlySpan<byte> Name_EndColumn => "\"endColumn\":"u8;
     
-    public static LocationsResponseBody Deserialize(global::System.ReadOnlySpan<byte> utf8Json, NoJsonSerializerOptions? options = null)
+    public static LocationsResponseBody Deserialize(global::System.ReadOnlySpan<byte> utf8Json, NoJsonSerializerOptions options)
     {
-        options ??= NoJsonSerializerOptions.Default;
         var tokenizer = new Utf8JsonTokenizer(utf8Json);
         tokenizer.ReadStartObject();
         var value = new LocationsResponseBody();
         ReadInto(ref tokenizer, value, options);
         return value;
-    }
-    
-    public static LocationsResponseBody Deserialize(byte[] utf8Json, NoJsonSerializerOptions? options = null) => Deserialize((global::System.ReadOnlySpan<byte>)utf8Json, options);
-    
-    public static LocationsResponseBody Deserialize(global::System.IO.Stream stream, NoJsonSerializerOptions? options = null)
-    {
-        return Deserialize(NoJsonStreamUtility.ReadAllBytes(stream), options);
-    }
-    
-    public static async global::System.Threading.Tasks.ValueTask<LocationsResponseBody> DeserializeAsync(global::System.IO.Stream stream, NoJsonSerializerOptions? options = null, global::System.Threading.CancellationToken cancellationToken = default)
-    {
-        var __bytes = await NoJsonStreamUtility.ReadAllBytesAsync(stream, cancellationToken).ConfigureAwait(false);
-        return Deserialize(__bytes, options);
     }
     
     internal static void ReadInto(ref Utf8JsonTokenizer tokenizer, LocationsResponseBody value, NoJsonSerializerOptions options)
@@ -47,7 +33,7 @@ public static partial class LocationsResponseBodyFormatter
                     if (__name.SequenceEqual("line"u8))
                     
                     {
-                        value.Line = tokenizer.ReadInt64();
+                        value.Line = tokenizer.ReadUInt64();
                     }
                     else
                     
@@ -75,7 +61,7 @@ public static partial class LocationsResponseBodyFormatter
                         else
                         
                         {
-                            value.Column = tokenizer.ReadInt64();
+                            value.Column = tokenizer.ReadUInt64();
                         }
                     }
                     else
@@ -96,7 +82,7 @@ public static partial class LocationsResponseBodyFormatter
                         else
                         
                         {
-                            value.EndLine = tokenizer.ReadInt64();
+                            value.EndLine = tokenizer.ReadUInt64();
                         }
                     }
                     else
@@ -117,7 +103,7 @@ public static partial class LocationsResponseBodyFormatter
                         else
                         
                         {
-                            value.EndColumn = tokenizer.ReadInt64();
+                            value.EndColumn = tokenizer.ReadUInt64();
                         }
                     }
                     else
@@ -135,33 +121,11 @@ public static partial class LocationsResponseBodyFormatter
         }
     }
     
-    public static void Serialize(global::System.Buffers.IBufferWriter<byte> writer, LocationsResponseBody value, NoJsonSerializerOptions? options = null)
+    public static void Serialize(global::System.Buffers.IBufferWriter<byte> writer, in LocationsResponseBody value, NoJsonSerializerOptions options)
     {
-        options ??= NoJsonSerializerOptions.Default;
         var w = new Utf8JsonBufferWriter(writer);
         WriteValue(ref w, value, options);
         w.Flush();
-    }
-    
-    public static byte[] SerializeToUtf8Bytes(LocationsResponseBody value, NoJsonSerializerOptions? options = null)
-    {
-        var buffer = new global::System.Buffers.ArrayBufferWriter<byte>(256);
-        Serialize(buffer, value, options);
-        return buffer.WrittenSpan.ToArray();
-    }
-    
-    public static void Serialize(global::System.IO.Stream stream, LocationsResponseBody value, NoJsonSerializerOptions? options = null)
-    {
-        var __buffer = new global::System.Buffers.ArrayBufferWriter<byte>(256);
-        Serialize(__buffer, value, options);
-        stream.Write(__buffer.WrittenSpan);
-    }
-    
-    public static async global::System.Threading.Tasks.ValueTask SerializeAsync(global::System.IO.Stream stream, LocationsResponseBody value, NoJsonSerializerOptions? options = null, global::System.Threading.CancellationToken cancellationToken = default)
-    {
-        var __buffer = new global::System.Buffers.ArrayBufferWriter<byte>(256);
-        Serialize(__buffer, value, options);
-        await stream.WriteAsync(__buffer.WrittenMemory, cancellationToken).ConfigureAwait(false);
     }
     
     internal static void WriteValue(ref Utf8JsonBufferWriter w, LocationsResponseBody value, NoJsonSerializerOptions options)
@@ -170,7 +134,7 @@ public static partial class LocationsResponseBodyFormatter
         w.WritePropertyNameRaw(Name_Source);
         SourceFormatter.WriteValue(ref w, value.Source!, options);
         w.WritePropertyNameRaw(Name_Line);
-        w.WriteInt64(value.Line);
+        w.WriteUInt64(value.Line);
         if (value.Column is null)
         {
             if (!options.SkipNullProperties)
@@ -184,7 +148,7 @@ public static partial class LocationsResponseBodyFormatter
         
         {
             w.WritePropertyNameRaw(Name_Column);
-            w.WriteInt64(value.Column.Value);
+            w.WriteUInt64(value.Column.Value);
         }
         if (value.EndLine is null)
         {
@@ -199,7 +163,7 @@ public static partial class LocationsResponseBodyFormatter
         
         {
             w.WritePropertyNameRaw(Name_EndLine);
-            w.WriteInt64(value.EndLine.Value);
+            w.WriteUInt64(value.EndLine.Value);
         }
         if (value.EndColumn is null)
         {
@@ -214,21 +178,8 @@ public static partial class LocationsResponseBodyFormatter
         
         {
             w.WritePropertyNameRaw(Name_EndColumn);
-            w.WriteInt64(value.EndColumn.Value);
+            w.WriteUInt64(value.EndColumn.Value);
         }
         w.WriteEndObject();
     }
-}
-
-sealed class LocationsResponseBodyFormatterAdapter : INoJsonFormatter<LocationsResponseBody>
-{
-    public static readonly LocationsResponseBodyFormatterAdapter Instance = new();
-    LocationsResponseBodyFormatterAdapter() { }
-    
-    public LocationsResponseBody Deserialize(global::System.ReadOnlySpan<byte> utf8Json, NoJsonSerializerOptions options) => LocationsResponseBodyFormatter.Deserialize(utf8Json, options);
-    public void Serialize(global::System.Buffers.IBufferWriter<byte> writer, in LocationsResponseBody value, NoJsonSerializerOptions options) => LocationsResponseBodyFormatter.Serialize(writer, value, options);
-    public LocationsResponseBody Deserialize(global::System.IO.Stream stream, NoJsonSerializerOptions options) => LocationsResponseBodyFormatter.Deserialize(stream, options);
-    public void Serialize(global::System.IO.Stream stream, in LocationsResponseBody value, NoJsonSerializerOptions options) => LocationsResponseBodyFormatter.Serialize(stream, value, options);
-    public global::System.Threading.Tasks.ValueTask<LocationsResponseBody> DeserializeAsync(global::System.IO.Stream stream, NoJsonSerializerOptions options, global::System.Threading.CancellationToken cancellationToken) => LocationsResponseBodyFormatter.DeserializeAsync(stream, options, cancellationToken);
-    public global::System.Threading.Tasks.ValueTask SerializeAsync(global::System.IO.Stream stream, LocationsResponseBody value, NoJsonSerializerOptions options, global::System.Threading.CancellationToken cancellationToken) => LocationsResponseBodyFormatter.SerializeAsync(stream, value, options, cancellationToken);
 }

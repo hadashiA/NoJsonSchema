@@ -21,5 +21,5 @@ public partial class ReadMemoryArguments
     /// <summary>
     /// Number of bytes to read at the specified location and offset.
     /// </summary>
-    public long Count { get; set; }
+    public ulong Count { get; set; }
 }

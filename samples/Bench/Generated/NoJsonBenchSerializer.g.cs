@@ -3,7 +3,6 @@
 
 using System;
 using System.Buffers;
-using System.IO;
 
 namespace NoJsonBench;
 
@@ -14,51 +13,6 @@ public sealed class NoJsonSerializerOptions
     public bool StrictExtraProperties { get; init; }
     public bool WriteIndented { get; init; }
     public bool SkipNullProperties { get; init; } = true;
-}
-
-/// <summary>
-/// Per-type formatter contract — the generic <c>{Ns}Serializer&lt;T&gt;</c> dispatch goes through a
-/// <c>Cache&lt;T&gt;</c> static-initialised once per CLR generic instantiation, then calls into one
-/// of these adapters. Keeps the hot path branch-free without sacrificing extensibility.
-/// </summary>
-public interface INoJsonFormatter<T>
-{
-    T Deserialize(global::System.ReadOnlySpan<byte> utf8Json, NoJsonSerializerOptions options);
-    void Serialize(global::System.Buffers.IBufferWriter<byte> writer, in T value, NoJsonSerializerOptions options);
-
-    T Deserialize(global::System.IO.Stream stream, NoJsonSerializerOptions options);
-    void Serialize(global::System.IO.Stream stream, in T value, NoJsonSerializerOptions options);
-
-    global::System.Threading.Tasks.ValueTask<T> DeserializeAsync(global::System.IO.Stream stream, NoJsonSerializerOptions options, global::System.Threading.CancellationToken cancellationToken);
-    global::System.Threading.Tasks.ValueTask SerializeAsync(global::System.IO.Stream stream, T value, NoJsonSerializerOptions options, global::System.Threading.CancellationToken cancellationToken);
-}
-
-/// <summary>
-/// Shared Stream &lt;-&gt; byte[] helpers. The fast path for in-memory <see cref="global::System.IO.MemoryStream"/>
-/// avoids an extra copy; otherwise the full payload is collected once before parsing.
-/// </summary>
-internal static class NoJsonStreamUtility
-{
-    public static byte[] ReadAllBytes(global::System.IO.Stream stream)
-    {
-        if (stream is global::System.IO.MemoryStream ms && ms.TryGetBuffer(out var seg))
-        {
-            var copy = new byte[seg.Count];
-            global::System.Buffer.BlockCopy(seg.Array!, seg.Offset, copy, 0, seg.Count);
-            return copy;
-        }
-        using var dest = new global::System.IO.MemoryStream();
-        stream.CopyTo(dest);
-        return dest.ToArray();
-    }
-
-    public static async global::System.Threading.Tasks.ValueTask<byte[]> ReadAllBytesAsync(
-        global::System.IO.Stream stream, global::System.Threading.CancellationToken cancellationToken)
-    {
-        using var dest = new global::System.IO.MemoryStream();
-        await stream.CopyToAsync(dest, 81920, cancellationToken).ConfigureAwait(false);
-        return dest.ToArray();
-    }
 }
 
 public sealed class NoJsonFormatException : global::System.Exception
@@ -92,7 +46,14 @@ public sealed class NoJsonFormatException : global::System.Exception
 /// </summary>
 ref struct Utf8JsonTokenizer
 {
+#if NET7_0_OR_GREATER
+    // C# 11 ref-byte field: zero indirection on hot reads.
     readonly ref byte head;
+#else
+    // Pre-net7 targets (netstandard 2.1) don't allow ref fields. Hold the span and recover the
+    // ref on-demand via MemoryMarshal.GetReference — JIT inlines `HeadRef()` to the same code.
+    readonly global::System.ReadOnlySpan<byte> input;
+#endif
     readonly int length;
     int pos;
     int valueStart;
@@ -101,13 +62,26 @@ ref struct Utf8JsonTokenizer
 
     public Utf8JsonTokenizer(global::System.ReadOnlySpan<byte> input)
     {
+#if NET7_0_OR_GREATER
         head = ref global::System.Runtime.InteropServices.MemoryMarshal.GetReference(input);
+#else
+        this.input = input;
+#endif
         length = input.Length;
         pos = 0;
         valueStart = 0;
         valueEnd = 0;
         valueHasEscape = false;
     }
+
+    /// <summary>Recover a writable <c>ref byte</c> at index 0 of the input span.</summary>
+    [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
+    ref byte HeadRef() =>
+#if NET7_0_OR_GREATER
+        ref head;
+#else
+        ref global::System.Runtime.InteropServices.MemoryMarshal.GetReference(input);
+#endif
 
     public int Position
     {
@@ -258,6 +232,42 @@ ref struct Utf8JsonTokenizer
         return false; // unreachable — the C# flow analyser doesn't honour [DoesNotReturn] for CS0161.
     }
 
+    public sbyte ReadSByte()
+    {
+        ReadNumberValue();
+        if (!global::System.Buffers.Text.Utf8Parser.TryParse(
+                SliceFrom(valueStart, valueEnd - valueStart), out sbyte v, out _))
+            ThrowFormatException("Invalid int8");
+        return v;
+    }
+
+    public byte ReadByte()
+    {
+        ReadNumberValue();
+        if (!global::System.Buffers.Text.Utf8Parser.TryParse(
+                SliceFrom(valueStart, valueEnd - valueStart), out byte v, out _))
+            ThrowFormatException("Invalid uint8");
+        return v;
+    }
+
+    public short ReadInt16()
+    {
+        ReadNumberValue();
+        if (!global::System.Buffers.Text.Utf8Parser.TryParse(
+                SliceFrom(valueStart, valueEnd - valueStart), out short v, out _))
+            ThrowFormatException("Invalid int16");
+        return v;
+    }
+
+    public ushort ReadUInt16()
+    {
+        ReadNumberValue();
+        if (!global::System.Buffers.Text.Utf8Parser.TryParse(
+                SliceFrom(valueStart, valueEnd - valueStart), out ushort v, out _))
+            ThrowFormatException("Invalid uint16");
+        return v;
+    }
+
     public int ReadInt32()
     {
         ReadNumberValue();
@@ -267,12 +277,30 @@ ref struct Utf8JsonTokenizer
         return v;
     }
 
+    public uint ReadUInt32()
+    {
+        ReadNumberValue();
+        if (!global::System.Buffers.Text.Utf8Parser.TryParse(
+                SliceFrom(valueStart, valueEnd - valueStart), out uint v, out _))
+            ThrowFormatException("Invalid uint32");
+        return v;
+    }
+
     public long ReadInt64()
     {
         ReadNumberValue();
         if (!global::System.Buffers.Text.Utf8Parser.TryParse(
                 SliceFrom(valueStart, valueEnd - valueStart), out long v, out _))
             ThrowFormatException("Invalid int64");
+        return v;
+    }
+
+    public ulong ReadUInt64()
+    {
+        ReadNumberValue();
+        if (!global::System.Buffers.Text.Utf8Parser.TryParse(
+                SliceFrom(valueStart, valueEnd - valueStart), out ulong v, out _))
+            ThrowFormatException("Invalid uint64");
         return v;
     }
 
@@ -308,6 +336,47 @@ ref struct Utf8JsonTokenizer
         if (!global::System.Guid.TryParse(s, out var v))
             ThrowFormatException("Invalid uuid '" + s + "'");
         return v;
+    }
+
+#if NET6_0_OR_GREATER
+    public global::System.DateOnly ReadDateOnly()
+    {
+        var s = ReadString();
+        if (!global::System.DateOnly.TryParse(s, global::System.Globalization.CultureInfo.InvariantCulture, global::System.Globalization.DateTimeStyles.None, out var v))
+            ThrowFormatException("Invalid date '" + s + "'");
+        return v;
+    }
+
+    public global::System.TimeOnly ReadTimeOnly()
+    {
+        var s = ReadString();
+        if (!global::System.TimeOnly.TryParse(s, global::System.Globalization.CultureInfo.InvariantCulture, global::System.Globalization.DateTimeStyles.None, out var v))
+            ThrowFormatException("Invalid time '" + s + "'");
+        return v;
+    }
+#endif
+
+    public global::System.TimeSpan ReadTimeSpan()
+    {
+        var s = ReadString();
+        // ISO 8601 duration ("PT1H30M") via XmlConvert — JSON Schema's `format: duration` mandates ISO 8601.
+        try { return global::System.Xml.XmlConvert.ToTimeSpan(s); }
+        catch (global::System.FormatException) { ThrowFormatException("Invalid duration '" + s + "'"); return default; }
+    }
+
+    public global::System.Uri ReadUri()
+    {
+        var s = ReadString();
+        if (!global::System.Uri.TryCreate(s, global::System.UriKind.RelativeOrAbsolute, out var v))
+            ThrowFormatException("Invalid uri '" + s + "'");
+        return v;
+    }
+
+    public byte[] ReadByteArray()
+    {
+        var s = ReadString();
+        try { return global::System.Convert.FromBase64String(s); }
+        catch (global::System.FormatException) { ThrowFormatException("Invalid base64"); return []; }
     }
 
     // ----- Discriminator peek (polymorphic dispatch) ---------------------------------------
@@ -461,12 +530,12 @@ ref struct Utf8JsonTokenizer
     }
 
     [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
-    byte ByteAt(int offset) => global::System.Runtime.CompilerServices.Unsafe.Add(ref head, offset);
+    byte ByteAt(int offset) => global::System.Runtime.CompilerServices.Unsafe.Add(ref HeadRef(), offset);
 
     [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
     global::System.ReadOnlySpan<byte> SliceFrom(int offset, int len) =>
         global::System.Runtime.InteropServices.MemoryMarshal.CreateReadOnlySpan(
-            ref global::System.Runtime.CompilerServices.Unsafe.Add(ref head, offset),
+            ref global::System.Runtime.CompilerServices.Unsafe.Add(ref HeadRef(), offset),
             len);
 
     [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
@@ -597,7 +666,13 @@ ref struct Utf8JsonTokenizer
 ref struct Utf8JsonBufferWriter
 {
     readonly global::System.Buffers.IBufferWriter<byte> writer;
-    ref byte spanHead;
+#if NET7_0_OR_GREATER
+    // C# 11 ref-byte field — moves forward via `Unsafe.Add` on every Advance.
+    ref byte bufferReference;
+#else
+    // Pre-net7: hold the rented span (no separate offset — slicing advances the view).
+    global::System.Span<byte> bufferReference;
+#endif
     int spanRemaining;
     int pending;
     bool needsSeparator;
@@ -605,7 +680,11 @@ ref struct Utf8JsonBufferWriter
     public Utf8JsonBufferWriter(global::System.Buffers.IBufferWriter<byte> writer)
     {
         this.writer = writer;
-        spanHead = ref global::System.Runtime.CompilerServices.Unsafe.NullRef<byte>();
+#if NET7_0_OR_GREATER
+        bufferReference = ref global::System.Runtime.CompilerServices.Unsafe.NullRef<byte>();
+#else
+        bufferReference = default;
+#endif
         spanRemaining = 0;
         pending = 0;
         needsSeparator = false;
@@ -616,16 +695,33 @@ ref struct Utf8JsonBufferWriter
         if (pending > 0)
         {
             writer.Advance(pending);
-            spanHead = ref global::System.Runtime.CompilerServices.Unsafe.NullRef<byte>();
+#if NET7_0_OR_GREATER
+            bufferReference = ref global::System.Runtime.CompilerServices.Unsafe.NullRef<byte>();
+#else
+            bufferReference = default;
+#endif
             spanRemaining = 0;
             pending = 0;
         }
     }
 
-    public void WriteStartObject() { MaybeSeparator(); WriteByte((byte)'{'); needsSeparator = false; }
-    public void WriteEndObject()   { needsSeparator = false; WriteByte((byte)'}'); needsSeparator = true; }
-    public void WriteStartArray()  { MaybeSeparator(); WriteByte((byte)'['); needsSeparator = false; }
-    public void WriteEndArray()    { needsSeparator = false; WriteByte((byte)']'); needsSeparator = true; }
+    /// <summary>Writable <c>ref byte</c> at <paramref name="offset"/> past the current write head.
+    /// JIT-inlines to a single ADD on net7+, and to <c>MemoryMarshal.GetReference + offset</c> on
+    /// netstandard. Callers use it as the LHS of an assignment (e.g. <c>GetByte(3) = b;</c>).</summary>
+    [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
+    ref byte GetByte(int offset) =>
+#if NET7_0_OR_GREATER
+        ref global::System.Runtime.CompilerServices.Unsafe.Add(ref bufferReference, offset);
+#else
+        ref global::System.Runtime.CompilerServices.Unsafe.Add(
+            ref global::System.Runtime.InteropServices.MemoryMarshal.GetReference(bufferReference),
+            offset);
+#endif
+
+    public void WriteStartObject() { MaybeSeparator(); AppendByte((byte)'{'); needsSeparator = false; }
+    public void WriteEndObject()   { needsSeparator = false; AppendByte((byte)'}'); needsSeparator = true; }
+    public void WriteStartArray()  { MaybeSeparator(); AppendByte((byte)'['); needsSeparator = false; }
+    public void WriteEndArray()    { needsSeparator = false; AppendByte((byte)']'); needsSeparator = true; }
 
     [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
     public void WritePropertyNameRaw(global::System.ReadOnlySpan<byte> nameWithQuotesAndColon)
@@ -642,9 +738,9 @@ ref struct Utf8JsonBufferWriter
     public void WriteRawStringValue(scoped global::System.ReadOnlySpan<byte> contentInsideQuotes)
     {
         MaybeSeparator();
-        WriteByte((byte)'"');
+        AppendByte((byte)'"');
         Append(contentInsideQuotes);
-        WriteByte((byte)'"');
+        AppendByte((byte)'"');
         needsSeparator = true;
     }
 
@@ -663,6 +759,74 @@ ref struct Utf8JsonBufferWriter
         WriteString(v.ToString("D", global::System.Globalization.CultureInfo.InvariantCulture));
     }
 
+#if NET6_0_OR_GREATER
+    public void WriteDateOnly(global::System.DateOnly v)
+    {
+        WriteString(v.ToString("yyyy-MM-dd", global::System.Globalization.CultureInfo.InvariantCulture));
+    }
+
+    public void WriteTimeOnly(global::System.TimeOnly v)
+    {
+        WriteString(v.ToString("O", global::System.Globalization.CultureInfo.InvariantCulture));
+    }
+#endif
+
+    public void WriteTimeSpan(global::System.TimeSpan v)
+    {
+        // Emit ISO 8601 duration (`P…T…`) so it round-trips through `format: duration` consumers.
+        WriteString(global::System.Xml.XmlConvert.ToString(v));
+    }
+
+    public void WriteUri(global::System.Uri v)
+    {
+        WriteString(v.ToString());
+    }
+
+    public void WriteByteArray(byte[] v)
+    {
+        WriteString(global::System.Convert.ToBase64String(v));
+    }
+
+    public void WriteSByte(sbyte v)
+    {
+        MaybeSeparator();
+        global::System.Span<byte> tmp = stackalloc byte[8];
+        if (!global::System.Buffers.Text.Utf8Formatter.TryFormat(v, tmp, out int written))
+            throw new global::System.InvalidOperationException("sbyte format");
+        Append(tmp.Slice(0, written));
+        needsSeparator = true;
+    }
+
+    public void WriteByte(byte v)
+    {
+        MaybeSeparator();
+        global::System.Span<byte> tmp = stackalloc byte[8];
+        if (!global::System.Buffers.Text.Utf8Formatter.TryFormat(v, tmp, out int written))
+            throw new global::System.InvalidOperationException("byte format");
+        Append(tmp.Slice(0, written));
+        needsSeparator = true;
+    }
+
+    public void WriteInt16(short v)
+    {
+        MaybeSeparator();
+        global::System.Span<byte> tmp = stackalloc byte[8];
+        if (!global::System.Buffers.Text.Utf8Formatter.TryFormat(v, tmp, out int written))
+            throw new global::System.InvalidOperationException("short format");
+        Append(tmp.Slice(0, written));
+        needsSeparator = true;
+    }
+
+    public void WriteUInt16(ushort v)
+    {
+        MaybeSeparator();
+        global::System.Span<byte> tmp = stackalloc byte[8];
+        if (!global::System.Buffers.Text.Utf8Formatter.TryFormat(v, tmp, out int written))
+            throw new global::System.InvalidOperationException("ushort format");
+        Append(tmp.Slice(0, written));
+        needsSeparator = true;
+    }
+
     public void WriteInt32(int v)
     {
         MaybeSeparator();
@@ -673,12 +837,32 @@ ref struct Utf8JsonBufferWriter
         needsSeparator = true;
     }
 
+    public void WriteUInt32(uint v)
+    {
+        MaybeSeparator();
+        global::System.Span<byte> tmp = stackalloc byte[16];
+        if (!global::System.Buffers.Text.Utf8Formatter.TryFormat(v, tmp, out int written))
+            throw new global::System.InvalidOperationException("uint format");
+        Append(tmp.Slice(0, written));
+        needsSeparator = true;
+    }
+
     public void WriteInt64(long v)
     {
         MaybeSeparator();
         global::System.Span<byte> tmp = stackalloc byte[24];
         if (!global::System.Buffers.Text.Utf8Formatter.TryFormat(v, tmp, out int written))
             throw new global::System.InvalidOperationException("long format");
+        Append(tmp.Slice(0, written));
+        needsSeparator = true;
+    }
+
+    public void WriteUInt64(ulong v)
+    {
+        MaybeSeparator();
+        global::System.Span<byte> tmp = stackalloc byte[24];
+        if (!global::System.Buffers.Text.Utf8Formatter.TryFormat(v, tmp, out int written))
+            throw new global::System.InvalidOperationException("ulong format");
         Append(tmp.Slice(0, written));
         needsSeparator = true;
     }
@@ -706,7 +890,7 @@ ref struct Utf8JsonBufferWriter
     public void WriteString(string value)
     {
         MaybeSeparator();
-        WriteByte((byte)'"');
+        AppendByte((byte)'"');
 
         var chars = value.AsSpan();
         int safeStart = 0;
@@ -730,12 +914,12 @@ ref struct Utf8JsonBufferWriter
                     if (c < 0x20)
                     {
                         Ensure(6);
-                        global::System.Runtime.CompilerServices.Unsafe.Add(ref spanHead, 0) = (byte)'\\';
-                        global::System.Runtime.CompilerServices.Unsafe.Add(ref spanHead, 1) = (byte)'u';
-                        global::System.Runtime.CompilerServices.Unsafe.Add(ref spanHead, 2) = (byte)'0';
-                        global::System.Runtime.CompilerServices.Unsafe.Add(ref spanHead, 3) = (byte)'0';
-                        global::System.Runtime.CompilerServices.Unsafe.Add(ref spanHead, 4) = HexByte((c >> 4) & 0xF);
-                        global::System.Runtime.CompilerServices.Unsafe.Add(ref spanHead, 5) = HexByte(c & 0xF);
+                        GetByte(0) = (byte)'\\';
+                        GetByte(1) = (byte)'u';
+                        GetByte(2) = (byte)'0';
+                        GetByte(3) = (byte)'0';
+                        GetByte(4) = HexByte((c >> 4) & 0xF);
+                        GetByte(5) = HexByte(c & 0xF);
                         Advance(6);
                     }
                     else
@@ -756,7 +940,7 @@ ref struct Utf8JsonBufferWriter
 
         if (chars.Length > safeStart) AppendAsciiRange(chars.Slice(safeStart));
 
-        WriteByte((byte)'"');
+        AppendByte((byte)'"');
         needsSeparator = true;
     }
 
@@ -766,7 +950,12 @@ ref struct Utf8JsonBufferWriter
     void AppendAsciiRange(scoped global::System.ReadOnlySpan<char> chars)
     {
         Ensure(chars.Length);
-        var destSpan = global::System.Runtime.InteropServices.MemoryMarshal.CreateSpan(ref spanHead, chars.Length);
+#if NET7_0_OR_GREATER
+        var destSpan = global::System.Runtime.InteropServices.MemoryMarshal.CreateSpan(ref bufferReference, chars.Length);
+#else
+        // Slice already-pinned span — bufferReference's start is already the write head.
+        var destSpan = bufferReference.Slice(0, chars.Length);
+#endif
         int written = global::System.Text.Encoding.UTF8.GetBytes(chars, destSpan);
         Advance(written);
     }
@@ -775,8 +964,8 @@ ref struct Utf8JsonBufferWriter
     void Append2(byte b0, byte b1)
     {
         Ensure(2);
-        global::System.Runtime.CompilerServices.Unsafe.Add(ref spanHead, 0) = b0;
-        global::System.Runtime.CompilerServices.Unsafe.Add(ref spanHead, 1) = b1;
+        GetByte(0) = b0;
+        GetByte(1) = b1;
         Advance(2);
     }
 
@@ -785,25 +974,25 @@ ref struct Utf8JsonBufferWriter
         if (cp < 0x800)
         {
             Ensure(2);
-            global::System.Runtime.CompilerServices.Unsafe.Add(ref spanHead, 0) = (byte)(0xC0 | (cp >> 6));
-            global::System.Runtime.CompilerServices.Unsafe.Add(ref spanHead, 1) = (byte)(0x80 | (cp & 0x3F));
+            GetByte(0) = (byte)(0xC0 | (cp >> 6));
+            GetByte(1) = (byte)(0x80 | (cp & 0x3F));
             Advance(2);
         }
         else if (cp < 0x10000)
         {
             Ensure(3);
-            global::System.Runtime.CompilerServices.Unsafe.Add(ref spanHead, 0) = (byte)(0xE0 | (cp >> 12));
-            global::System.Runtime.CompilerServices.Unsafe.Add(ref spanHead, 1) = (byte)(0x80 | ((cp >> 6) & 0x3F));
-            global::System.Runtime.CompilerServices.Unsafe.Add(ref spanHead, 2) = (byte)(0x80 | (cp & 0x3F));
+            GetByte(0) = (byte)(0xE0 | (cp >> 12));
+            GetByte(1) = (byte)(0x80 | ((cp >> 6) & 0x3F));
+            GetByte(2) = (byte)(0x80 | (cp & 0x3F));
             Advance(3);
         }
         else
         {
             Ensure(4);
-            global::System.Runtime.CompilerServices.Unsafe.Add(ref spanHead, 0) = (byte)(0xF0 | (cp >> 18));
-            global::System.Runtime.CompilerServices.Unsafe.Add(ref spanHead, 1) = (byte)(0x80 | ((cp >> 12) & 0x3F));
-            global::System.Runtime.CompilerServices.Unsafe.Add(ref spanHead, 2) = (byte)(0x80 | ((cp >> 6) & 0x3F));
-            global::System.Runtime.CompilerServices.Unsafe.Add(ref spanHead, 3) = (byte)(0x80 | (cp & 0x3F));
+            GetByte(0) = (byte)(0xF0 | (cp >> 18));
+            GetByte(1) = (byte)(0x80 | ((cp >> 12) & 0x3F));
+            GetByte(2) = (byte)(0x80 | ((cp >> 6) & 0x3F));
+            GetByte(3) = (byte)(0x80 | (cp & 0x3F));
             Advance(4);
         }
     }
@@ -811,7 +1000,7 @@ ref struct Utf8JsonBufferWriter
     [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
     void MaybeSeparator()
     {
-        if (needsSeparator) WriteByte((byte)',');
+        if (needsSeparator) AppendByte((byte)',');
     }
 
     [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
@@ -819,24 +1008,29 @@ ref struct Utf8JsonBufferWriter
     {
         Ensure(data.Length);
         global::System.Runtime.CompilerServices.Unsafe.CopyBlockUnaligned(
-            ref spanHead,
+            ref GetByte(0),
             ref global::System.Runtime.InteropServices.MemoryMarshal.GetReference(data),
             (uint)data.Length);
         Advance(data.Length);
     }
 
     [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
-    void WriteByte(byte b)
+    void AppendByte(byte b)
     {
         Ensure(1);
-        spanHead = b;
+        GetByte(0) = b;
         Advance(1);
     }
 
     [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
     void Advance(int n)
     {
-        spanHead = ref global::System.Runtime.CompilerServices.Unsafe.Add(ref spanHead, n);
+#if NET7_0_OR_GREATER
+        bufferReference = ref global::System.Runtime.CompilerServices.Unsafe.Add(ref bufferReference, n);
+#else
+        // Span tracks the head itself via slicing — no separate offset to bump.
+        bufferReference = bufferReference.Slice(n);
+#endif
         spanRemaining -= n;
         pending += n;
     }
@@ -846,41 +1040,55 @@ ref struct Utf8JsonBufferWriter
         if (spanRemaining >= needed) return;
         Flush();
         var newSpan = writer.GetSpan(needed > 256 ? needed : 256);
-        spanHead = ref global::System.Runtime.InteropServices.MemoryMarshal.GetReference(newSpan);
+#if NET7_0_OR_GREATER
+        bufferReference = ref global::System.Runtime.InteropServices.MemoryMarshal.GetReference(newSpan);
+#else
+        bufferReference = newSpan;
+#endif
         spanRemaining = newSpan.Length;
     }
 }
 
 public static class NoJsonBenchSerializer
 {
-    static readonly global::System.Collections.Generic.Dictionary<global::System.Type, object> Formatters = new(2)
+    delegate T DeserializeDelegate<T>(global::System.ReadOnlySpan<byte> utf8Json, NoJsonSerializerOptions options);
+    delegate void SerializeDelegate<T>(global::System.Buffers.IBufferWriter<byte> writer, in T value, NoJsonSerializerOptions options);
+    
+    static readonly global::System.Collections.Generic.Dictionary<global::System.Type, (object Deserialize, object Serialize)> Formatters = new(2)
     {
-        [typeof(Address)] = AddressFormatterAdapter.Instance,
-        [typeof(User)] = UserFormatterAdapter.Instance,
+        [typeof(Address)] = ((DeserializeDelegate<Address>)AddressFormatter.Deserialize, (SerializeDelegate<Address>)AddressFormatter.Serialize),
+        [typeof(User)] = ((DeserializeDelegate<User>)UserFormatter.Deserialize, (SerializeDelegate<User>)UserFormatter.Serialize),
     };
     
     static class Cache<T>
     {
-        public static readonly INoJsonFormatter<T>? Formatter =
-            Formatters.TryGetValue(typeof(T), out var __v)
-                ? global::System.Runtime.CompilerServices.Unsafe.As<INoJsonFormatter<T>>(__v)
-                : null;
+        public static readonly DeserializeDelegate<T>? Deserialize;
+        public static readonly SerializeDelegate<T>? Serialize;
+        
+        static Cache()
+        {
+            if (Formatters.TryGetValue(typeof(T), out var __entry))
+            {
+                Deserialize = global::System.Runtime.CompilerServices.Unsafe.As<DeserializeDelegate<T>>(__entry.Deserialize);
+                Serialize = global::System.Runtime.CompilerServices.Unsafe.As<SerializeDelegate<T>>(__entry.Serialize);
+            }
+        }
     }
     
     public static T Deserialize<T>(global::System.ReadOnlySpan<byte> utf8Json, NoJsonSerializerOptions? options = null)
     {
-        var formatter = Cache<T>.Formatter;
-        if (formatter is null) ThrowNotSupported<T>();
-        return formatter!.Deserialize(utf8Json, options ?? NoJsonSerializerOptions.Default);
+        var del = Cache<T>.Deserialize;
+        if (del is null) ThrowNotSupported<T>();
+        return del!(utf8Json, options ?? NoJsonSerializerOptions.Default);
     }
     
     public static T Deserialize<T>(byte[] utf8Json, NoJsonSerializerOptions? options = null) => Deserialize<T>((global::System.ReadOnlySpan<byte>)utf8Json, options);
     
     public static void Serialize<T>(global::System.Buffers.IBufferWriter<byte> writer, T value, NoJsonSerializerOptions? options = null)
     {
-        var formatter = Cache<T>.Formatter;
-        if (formatter is null) ThrowNotSupported<T>();
-        formatter!.Serialize(writer, in value, options ?? NoJsonSerializerOptions.Default);
+        var del = Cache<T>.Serialize;
+        if (del is null) ThrowNotSupported<T>();
+        del!(writer, value, options ?? NoJsonSerializerOptions.Default);
     }
     
     public static byte[] SerializeToUtf8Bytes<T>(T value, NoJsonSerializerOptions? options = null)
@@ -888,34 +1096,6 @@ public static class NoJsonBenchSerializer
         var buffer = new global::System.Buffers.ArrayBufferWriter<byte>(256);
         Serialize<T>(buffer, value, options);
         return buffer.WrittenSpan.ToArray();
-    }
-    
-    public static T Deserialize<T>(global::System.IO.Stream stream, NoJsonSerializerOptions? options = null)
-    {
-        var formatter = Cache<T>.Formatter;
-        if (formatter is null) ThrowNotSupported<T>();
-        return formatter!.Deserialize(stream, options ?? NoJsonSerializerOptions.Default);
-    }
-    
-    public static global::System.Threading.Tasks.ValueTask<T> DeserializeAsync<T>(global::System.IO.Stream stream, NoJsonSerializerOptions? options = null, global::System.Threading.CancellationToken cancellationToken = default)
-    {
-        var formatter = Cache<T>.Formatter;
-        if (formatter is null) ThrowNotSupported<T>();
-        return formatter!.DeserializeAsync(stream, options ?? NoJsonSerializerOptions.Default, cancellationToken);
-    }
-    
-    public static void Serialize<T>(global::System.IO.Stream stream, T value, NoJsonSerializerOptions? options = null)
-    {
-        var formatter = Cache<T>.Formatter;
-        if (formatter is null) ThrowNotSupported<T>();
-        formatter!.Serialize(stream, in value, options ?? NoJsonSerializerOptions.Default);
-    }
-    
-    public static global::System.Threading.Tasks.ValueTask SerializeAsync<T>(global::System.IO.Stream stream, T value, NoJsonSerializerOptions? options = null, global::System.Threading.CancellationToken cancellationToken = default)
-    {
-        var formatter = Cache<T>.Formatter;
-        if (formatter is null) ThrowNotSupported<T>();
-        return formatter!.SerializeAsync(stream, value, options ?? NoJsonSerializerOptions.Default, cancellationToken);
     }
     
     [global::System.Diagnostics.CodeAnalysis.DoesNotReturn]

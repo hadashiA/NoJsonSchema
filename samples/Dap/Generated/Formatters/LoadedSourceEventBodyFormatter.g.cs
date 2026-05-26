@@ -6,32 +6,18 @@ using System.Buffers;
 
 namespace Dap;
 
-public static partial class LoadedSourceEventBodyFormatter
+static partial class LoadedSourceEventBodyFormatter
 {
     static global::System.ReadOnlySpan<byte> Name_Reason => "\"reason\":"u8;
     static global::System.ReadOnlySpan<byte> Name_Source => "\"source\":"u8;
     
-    public static LoadedSourceEventBody Deserialize(global::System.ReadOnlySpan<byte> utf8Json, NoJsonSerializerOptions? options = null)
+    public static LoadedSourceEventBody Deserialize(global::System.ReadOnlySpan<byte> utf8Json, NoJsonSerializerOptions options)
     {
-        options ??= NoJsonSerializerOptions.Default;
         var tokenizer = new Utf8JsonTokenizer(utf8Json);
         tokenizer.ReadStartObject();
         var value = new LoadedSourceEventBody();
         ReadInto(ref tokenizer, value, options);
         return value;
-    }
-    
-    public static LoadedSourceEventBody Deserialize(byte[] utf8Json, NoJsonSerializerOptions? options = null) => Deserialize((global::System.ReadOnlySpan<byte>)utf8Json, options);
-    
-    public static LoadedSourceEventBody Deserialize(global::System.IO.Stream stream, NoJsonSerializerOptions? options = null)
-    {
-        return Deserialize(NoJsonStreamUtility.ReadAllBytes(stream), options);
-    }
-    
-    public static async global::System.Threading.Tasks.ValueTask<LoadedSourceEventBody> DeserializeAsync(global::System.IO.Stream stream, NoJsonSerializerOptions? options = null, global::System.Threading.CancellationToken cancellationToken = default)
-    {
-        var __bytes = await NoJsonStreamUtility.ReadAllBytesAsync(stream, cancellationToken).ConfigureAwait(false);
-        return Deserialize(__bytes, options);
     }
     
     internal static void ReadInto(ref Utf8JsonTokenizer tokenizer, LoadedSourceEventBody value, NoJsonSerializerOptions options)
@@ -69,33 +55,11 @@ public static partial class LoadedSourceEventBodyFormatter
         }
     }
     
-    public static void Serialize(global::System.Buffers.IBufferWriter<byte> writer, LoadedSourceEventBody value, NoJsonSerializerOptions? options = null)
+    public static void Serialize(global::System.Buffers.IBufferWriter<byte> writer, in LoadedSourceEventBody value, NoJsonSerializerOptions options)
     {
-        options ??= NoJsonSerializerOptions.Default;
         var w = new Utf8JsonBufferWriter(writer);
         WriteValue(ref w, value, options);
         w.Flush();
-    }
-    
-    public static byte[] SerializeToUtf8Bytes(LoadedSourceEventBody value, NoJsonSerializerOptions? options = null)
-    {
-        var buffer = new global::System.Buffers.ArrayBufferWriter<byte>(256);
-        Serialize(buffer, value, options);
-        return buffer.WrittenSpan.ToArray();
-    }
-    
-    public static void Serialize(global::System.IO.Stream stream, LoadedSourceEventBody value, NoJsonSerializerOptions? options = null)
-    {
-        var __buffer = new global::System.Buffers.ArrayBufferWriter<byte>(256);
-        Serialize(__buffer, value, options);
-        stream.Write(__buffer.WrittenSpan);
-    }
-    
-    public static async global::System.Threading.Tasks.ValueTask SerializeAsync(global::System.IO.Stream stream, LoadedSourceEventBody value, NoJsonSerializerOptions? options = null, global::System.Threading.CancellationToken cancellationToken = default)
-    {
-        var __buffer = new global::System.Buffers.ArrayBufferWriter<byte>(256);
-        Serialize(__buffer, value, options);
-        await stream.WriteAsync(__buffer.WrittenMemory, cancellationToken).ConfigureAwait(false);
     }
     
     internal static void WriteValue(ref Utf8JsonBufferWriter w, LoadedSourceEventBody value, NoJsonSerializerOptions options)
@@ -107,17 +71,4 @@ public static partial class LoadedSourceEventBodyFormatter
         SourceFormatter.WriteValue(ref w, value.Source!, options);
         w.WriteEndObject();
     }
-}
-
-sealed class LoadedSourceEventBodyFormatterAdapter : INoJsonFormatter<LoadedSourceEventBody>
-{
-    public static readonly LoadedSourceEventBodyFormatterAdapter Instance = new();
-    LoadedSourceEventBodyFormatterAdapter() { }
-    
-    public LoadedSourceEventBody Deserialize(global::System.ReadOnlySpan<byte> utf8Json, NoJsonSerializerOptions options) => LoadedSourceEventBodyFormatter.Deserialize(utf8Json, options);
-    public void Serialize(global::System.Buffers.IBufferWriter<byte> writer, in LoadedSourceEventBody value, NoJsonSerializerOptions options) => LoadedSourceEventBodyFormatter.Serialize(writer, value, options);
-    public LoadedSourceEventBody Deserialize(global::System.IO.Stream stream, NoJsonSerializerOptions options) => LoadedSourceEventBodyFormatter.Deserialize(stream, options);
-    public void Serialize(global::System.IO.Stream stream, in LoadedSourceEventBody value, NoJsonSerializerOptions options) => LoadedSourceEventBodyFormatter.Serialize(stream, value, options);
-    public global::System.Threading.Tasks.ValueTask<LoadedSourceEventBody> DeserializeAsync(global::System.IO.Stream stream, NoJsonSerializerOptions options, global::System.Threading.CancellationToken cancellationToken) => LoadedSourceEventBodyFormatter.DeserializeAsync(stream, options, cancellationToken);
-    public global::System.Threading.Tasks.ValueTask SerializeAsync(global::System.IO.Stream stream, LoadedSourceEventBody value, NoJsonSerializerOptions options, global::System.Threading.CancellationToken cancellationToken) => LoadedSourceEventBodyFormatter.SerializeAsync(stream, value, options, cancellationToken);
 }

@@ -102,26 +102,22 @@ public class PolymorphismTests(ITestOutputHelper output)
         catType.GetProperty("Name")!.SetValue(cat, "Whiskers");
         catType.GetProperty("Purrs")!.SetValue(cat, true);
 
-        var petFormatter = asm.GetType("Pets.PetFormatter")!;
-        var optsType = asm.GetType("Pets.NoJsonSerializerOptions")!;
-        var serialize = petFormatter.GetMethod("SerializeToUtf8Bytes",
-            BindingFlags.Public | BindingFlags.Static, null, [petType, optsType], null)!;
-        var bytes = (byte[])serialize.Invoke(null, [cat, null])!;
+        // Serialize via the polymorphic base (Pet), but pass the Cat instance — the Serializer<T>
+        // dispatches polymorphically to CatFormatter.Serialize.
+        var bytes = RoundtripReflection.SerializeToUtf8Bytes(asm, "Pets", petType, cat);
         var json = Encoding.UTF8.GetString(bytes);
         output.WriteLine("emitted: " + json);
         Assert.Contains("\"petType\":\"cat\"", json);
         Assert.Contains("\"purrs\":true", json);
 
         // Deserialize back via the polymorphic base — must hand us a Cat.
-        var deserialize = petFormatter.GetMethod("Deserialize",
-            BindingFlags.Public | BindingFlags.Static, null, [typeof(byte[]), optsType], null)!;
-        var decoded = deserialize.Invoke(null, [bytes, null])!;
+        var decoded = RoundtripReflection.Deserialize(asm, "Pets", "Pet", bytes);
         Assert.IsType(catType, decoded);
         Assert.Equal("Whiskers", catType.GetProperty("Name")!.GetValue(decoded));
 
         // The other branch: Dog
         var dogJson = "{\"petType\":\"dog\",\"name\":\"Rex\",\"barksLoud\":true}";
-        var decodedDog = deserialize.Invoke(null, [Encoding.UTF8.GetBytes(dogJson), null])!;
+        var decodedDog = RoundtripReflection.Deserialize(asm, "Pets", "Pet", Encoding.UTF8.GetBytes(dogJson));
         Assert.IsType(dogType, decodedDog);
         Assert.Equal("Rex", dogType.GetProperty("Name")!.GetValue(decodedDog));
     }
@@ -161,13 +157,9 @@ public class PolymorphismTests(ITestOutputHelper output)
         var (asm, gen) = Compile(doc, "Shapes");
         foreach (var f in gen.Files.Where(f => f.FileName.Contains("Shape"))) output.WriteLine($"--- {f.FileName} ---\n{f.SourceText}");
 
-        var formatter = asm.GetType("Shapes.ShapeFormatter")!;
-        var optsType = asm.GetType("Shapes.NoJsonSerializerOptions")!;
-        var deserialize = formatter.GetMethod("Deserialize",
-            BindingFlags.Public | BindingFlags.Static, null, [typeof(byte[]), optsType], null)!;
-
         // The implicit discriminator value is the short ref name.
-        var decoded = deserialize.Invoke(null, [Encoding.UTF8.GetBytes("{\"kind\":\"Circle\",\"radius\":5}"), null])!;
+        var decoded = RoundtripReflection.Deserialize(asm, "Shapes", "Shape",
+            Encoding.UTF8.GetBytes("{\"kind\":\"Circle\",\"radius\":5}"));
         Assert.Equal("Circle", decoded.GetType().Name);
     }
 
@@ -194,13 +186,9 @@ public class PolymorphismTests(ITestOutputHelper output)
         }
         """;
         var (asm, _) = Compile(doc, "Zoo");
-        var formatter = asm.GetType("Zoo.AnimalFormatter")!;
-        var optsType = asm.GetType("Zoo.NoJsonSerializerOptions")!;
-        var deserialize = formatter.GetMethod("Deserialize",
-            BindingFlags.Public | BindingFlags.Static, null, [typeof(byte[]), optsType], null)!;
 
         var ex = Assert.ThrowsAny<Exception>(() =>
-            deserialize.Invoke(null, [Encoding.UTF8.GetBytes("{\"species\":\"shark\"}"), null]));
+            RoundtripReflection.Deserialize(asm, "Zoo", "Animal", Encoding.UTF8.GetBytes("{\"species\":\"shark\"}")));
         var inner = ex.InnerException ?? ex;
         Assert.Contains("shark", inner.Message);
     }

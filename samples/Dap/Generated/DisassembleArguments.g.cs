@@ -27,7 +27,7 @@ public partial class DisassembleArguments
     /// Number of instructions to disassemble starting at the specified location and offset.
     /// An adapter must return exactly this number of instructions - any unavailable instructions should be replaced with an implementation-defined &#39;invalid instruction&#39; value.
     /// </summary>
-    public long InstructionCount { get; set; }
+    public uint InstructionCount { get; set; }
     
     /// <summary>
     /// If true, the adapter should attempt to resolve memory addresses and other values to symbolic names.

@@ -6,7 +6,7 @@ using System.Buffers;
 
 namespace Dap;
 
-public static partial class DisassembleArgumentsFormatter
+static partial class DisassembleArgumentsFormatter
 {
     static global::System.ReadOnlySpan<byte> Name_MemoryReference => "\"memoryReference\":"u8;
     static global::System.ReadOnlySpan<byte> Name_Offset => "\"offset\":"u8;
@@ -14,27 +14,13 @@ public static partial class DisassembleArgumentsFormatter
     static global::System.ReadOnlySpan<byte> Name_InstructionCount => "\"instructionCount\":"u8;
     static global::System.ReadOnlySpan<byte> Name_ResolveSymbols => "\"resolveSymbols\":"u8;
     
-    public static DisassembleArguments Deserialize(global::System.ReadOnlySpan<byte> utf8Json, NoJsonSerializerOptions? options = null)
+    public static DisassembleArguments Deserialize(global::System.ReadOnlySpan<byte> utf8Json, NoJsonSerializerOptions options)
     {
-        options ??= NoJsonSerializerOptions.Default;
         var tokenizer = new Utf8JsonTokenizer(utf8Json);
         tokenizer.ReadStartObject();
         var value = new DisassembleArguments();
         ReadInto(ref tokenizer, value, options);
         return value;
-    }
-    
-    public static DisassembleArguments Deserialize(byte[] utf8Json, NoJsonSerializerOptions? options = null) => Deserialize((global::System.ReadOnlySpan<byte>)utf8Json, options);
-    
-    public static DisassembleArguments Deserialize(global::System.IO.Stream stream, NoJsonSerializerOptions? options = null)
-    {
-        return Deserialize(NoJsonStreamUtility.ReadAllBytes(stream), options);
-    }
-    
-    public static async global::System.Threading.Tasks.ValueTask<DisassembleArguments> DeserializeAsync(global::System.IO.Stream stream, NoJsonSerializerOptions? options = null, global::System.Threading.CancellationToken cancellationToken = default)
-    {
-        var __bytes = await NoJsonStreamUtility.ReadAllBytesAsync(stream, cancellationToken).ConfigureAwait(false);
-        return Deserialize(__bytes, options);
     }
     
     internal static void ReadInto(ref Utf8JsonTokenizer tokenizer, DisassembleArguments value, NoJsonSerializerOptions options)
@@ -102,7 +88,7 @@ public static partial class DisassembleArgumentsFormatter
                     if (__name.SequenceEqual("instructionCount"u8))
                     
                     {
-                        value.InstructionCount = tokenizer.ReadInt64();
+                        value.InstructionCount = tokenizer.ReadUInt32();
                     }
                     else
                     
@@ -140,33 +126,11 @@ public static partial class DisassembleArgumentsFormatter
         }
     }
     
-    public static void Serialize(global::System.Buffers.IBufferWriter<byte> writer, DisassembleArguments value, NoJsonSerializerOptions? options = null)
+    public static void Serialize(global::System.Buffers.IBufferWriter<byte> writer, in DisassembleArguments value, NoJsonSerializerOptions options)
     {
-        options ??= NoJsonSerializerOptions.Default;
         var w = new Utf8JsonBufferWriter(writer);
         WriteValue(ref w, value, options);
         w.Flush();
-    }
-    
-    public static byte[] SerializeToUtf8Bytes(DisassembleArguments value, NoJsonSerializerOptions? options = null)
-    {
-        var buffer = new global::System.Buffers.ArrayBufferWriter<byte>(256);
-        Serialize(buffer, value, options);
-        return buffer.WrittenSpan.ToArray();
-    }
-    
-    public static void Serialize(global::System.IO.Stream stream, DisassembleArguments value, NoJsonSerializerOptions? options = null)
-    {
-        var __buffer = new global::System.Buffers.ArrayBufferWriter<byte>(256);
-        Serialize(__buffer, value, options);
-        stream.Write(__buffer.WrittenSpan);
-    }
-    
-    public static async global::System.Threading.Tasks.ValueTask SerializeAsync(global::System.IO.Stream stream, DisassembleArguments value, NoJsonSerializerOptions? options = null, global::System.Threading.CancellationToken cancellationToken = default)
-    {
-        var __buffer = new global::System.Buffers.ArrayBufferWriter<byte>(256);
-        Serialize(__buffer, value, options);
-        await stream.WriteAsync(__buffer.WrittenMemory, cancellationToken).ConfigureAwait(false);
     }
     
     internal static void WriteValue(ref Utf8JsonBufferWriter w, DisassembleArguments value, NoJsonSerializerOptions options)
@@ -205,7 +169,7 @@ public static partial class DisassembleArgumentsFormatter
             w.WriteInt64(value.InstructionOffset.Value);
         }
         w.WritePropertyNameRaw(Name_InstructionCount);
-        w.WriteInt64(value.InstructionCount);
+        w.WriteUInt32(value.InstructionCount);
         if (value.ResolveSymbols is null)
         {
             if (!options.SkipNullProperties)
@@ -223,17 +187,4 @@ public static partial class DisassembleArgumentsFormatter
         }
         w.WriteEndObject();
     }
-}
-
-sealed class DisassembleArgumentsFormatterAdapter : INoJsonFormatter<DisassembleArguments>
-{
-    public static readonly DisassembleArgumentsFormatterAdapter Instance = new();
-    DisassembleArgumentsFormatterAdapter() { }
-    
-    public DisassembleArguments Deserialize(global::System.ReadOnlySpan<byte> utf8Json, NoJsonSerializerOptions options) => DisassembleArgumentsFormatter.Deserialize(utf8Json, options);
-    public void Serialize(global::System.Buffers.IBufferWriter<byte> writer, in DisassembleArguments value, NoJsonSerializerOptions options) => DisassembleArgumentsFormatter.Serialize(writer, value, options);
-    public DisassembleArguments Deserialize(global::System.IO.Stream stream, NoJsonSerializerOptions options) => DisassembleArgumentsFormatter.Deserialize(stream, options);
-    public void Serialize(global::System.IO.Stream stream, in DisassembleArguments value, NoJsonSerializerOptions options) => DisassembleArgumentsFormatter.Serialize(stream, value, options);
-    public global::System.Threading.Tasks.ValueTask<DisassembleArguments> DeserializeAsync(global::System.IO.Stream stream, NoJsonSerializerOptions options, global::System.Threading.CancellationToken cancellationToken) => DisassembleArgumentsFormatter.DeserializeAsync(stream, options, cancellationToken);
-    public global::System.Threading.Tasks.ValueTask SerializeAsync(global::System.IO.Stream stream, DisassembleArguments value, NoJsonSerializerOptions options, global::System.Threading.CancellationToken cancellationToken) => DisassembleArgumentsFormatter.SerializeAsync(stream, value, options, cancellationToken);
 }

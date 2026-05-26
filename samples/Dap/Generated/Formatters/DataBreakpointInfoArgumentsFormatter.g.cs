@@ -6,7 +6,7 @@ using System.Buffers;
 
 namespace Dap;
 
-public static partial class DataBreakpointInfoArgumentsFormatter
+static partial class DataBreakpointInfoArgumentsFormatter
 {
     static global::System.ReadOnlySpan<byte> Name_VariablesReference => "\"variablesReference\":"u8;
     static global::System.ReadOnlySpan<byte> Name_Name => "\"name\":"u8;
@@ -15,27 +15,13 @@ public static partial class DataBreakpointInfoArgumentsFormatter
     static global::System.ReadOnlySpan<byte> Name_AsAddress => "\"asAddress\":"u8;
     static global::System.ReadOnlySpan<byte> Name_Mode => "\"mode\":"u8;
     
-    public static DataBreakpointInfoArguments Deserialize(global::System.ReadOnlySpan<byte> utf8Json, NoJsonSerializerOptions? options = null)
+    public static DataBreakpointInfoArguments Deserialize(global::System.ReadOnlySpan<byte> utf8Json, NoJsonSerializerOptions options)
     {
-        options ??= NoJsonSerializerOptions.Default;
         var tokenizer = new Utf8JsonTokenizer(utf8Json);
         tokenizer.ReadStartObject();
         var value = new DataBreakpointInfoArguments();
         ReadInto(ref tokenizer, value, options);
         return value;
-    }
-    
-    public static DataBreakpointInfoArguments Deserialize(byte[] utf8Json, NoJsonSerializerOptions? options = null) => Deserialize((global::System.ReadOnlySpan<byte>)utf8Json, options);
-    
-    public static DataBreakpointInfoArguments Deserialize(global::System.IO.Stream stream, NoJsonSerializerOptions? options = null)
-    {
-        return Deserialize(NoJsonStreamUtility.ReadAllBytes(stream), options);
-    }
-    
-    public static async global::System.Threading.Tasks.ValueTask<DataBreakpointInfoArguments> DeserializeAsync(global::System.IO.Stream stream, NoJsonSerializerOptions? options = null, global::System.Threading.CancellationToken cancellationToken = default)
-    {
-        var __bytes = await NoJsonStreamUtility.ReadAllBytesAsync(stream, cancellationToken).ConfigureAwait(false);
-        return Deserialize(__bytes, options);
     }
     
     internal static void ReadInto(ref Utf8JsonTokenizer tokenizer, DataBreakpointInfoArguments value, NoJsonSerializerOptions options)
@@ -81,7 +67,7 @@ public static partial class DataBreakpointInfoArgumentsFormatter
                         else
                         
                         {
-                            value.Bytes = tokenizer.ReadInt64();
+                            value.Bytes = tokenizer.ReadUInt32();
                         }
                     }
                     else
@@ -162,33 +148,11 @@ public static partial class DataBreakpointInfoArgumentsFormatter
         }
     }
     
-    public static void Serialize(global::System.Buffers.IBufferWriter<byte> writer, DataBreakpointInfoArguments value, NoJsonSerializerOptions? options = null)
+    public static void Serialize(global::System.Buffers.IBufferWriter<byte> writer, in DataBreakpointInfoArguments value, NoJsonSerializerOptions options)
     {
-        options ??= NoJsonSerializerOptions.Default;
         var w = new Utf8JsonBufferWriter(writer);
         WriteValue(ref w, value, options);
         w.Flush();
-    }
-    
-    public static byte[] SerializeToUtf8Bytes(DataBreakpointInfoArguments value, NoJsonSerializerOptions? options = null)
-    {
-        var buffer = new global::System.Buffers.ArrayBufferWriter<byte>(256);
-        Serialize(buffer, value, options);
-        return buffer.WrittenSpan.ToArray();
-    }
-    
-    public static void Serialize(global::System.IO.Stream stream, DataBreakpointInfoArguments value, NoJsonSerializerOptions? options = null)
-    {
-        var __buffer = new global::System.Buffers.ArrayBufferWriter<byte>(256);
-        Serialize(__buffer, value, options);
-        stream.Write(__buffer.WrittenSpan);
-    }
-    
-    public static async global::System.Threading.Tasks.ValueTask SerializeAsync(global::System.IO.Stream stream, DataBreakpointInfoArguments value, NoJsonSerializerOptions? options = null, global::System.Threading.CancellationToken cancellationToken = default)
-    {
-        var __buffer = new global::System.Buffers.ArrayBufferWriter<byte>(256);
-        Serialize(__buffer, value, options);
-        await stream.WriteAsync(__buffer.WrittenMemory, cancellationToken).ConfigureAwait(false);
     }
     
     internal static void WriteValue(ref Utf8JsonBufferWriter w, DataBreakpointInfoArguments value, NoJsonSerializerOptions options)
@@ -239,7 +203,7 @@ public static partial class DataBreakpointInfoArgumentsFormatter
         
         {
             w.WritePropertyNameRaw(Name_Bytes);
-            w.WriteInt64(value.Bytes.Value);
+            w.WriteUInt32(value.Bytes.Value);
         }
         if (value.AsAddress is null)
         {
@@ -273,17 +237,4 @@ public static partial class DataBreakpointInfoArgumentsFormatter
         }
         w.WriteEndObject();
     }
-}
-
-sealed class DataBreakpointInfoArgumentsFormatterAdapter : INoJsonFormatter<DataBreakpointInfoArguments>
-{
-    public static readonly DataBreakpointInfoArgumentsFormatterAdapter Instance = new();
-    DataBreakpointInfoArgumentsFormatterAdapter() { }
-    
-    public DataBreakpointInfoArguments Deserialize(global::System.ReadOnlySpan<byte> utf8Json, NoJsonSerializerOptions options) => DataBreakpointInfoArgumentsFormatter.Deserialize(utf8Json, options);
-    public void Serialize(global::System.Buffers.IBufferWriter<byte> writer, in DataBreakpointInfoArguments value, NoJsonSerializerOptions options) => DataBreakpointInfoArgumentsFormatter.Serialize(writer, value, options);
-    public DataBreakpointInfoArguments Deserialize(global::System.IO.Stream stream, NoJsonSerializerOptions options) => DataBreakpointInfoArgumentsFormatter.Deserialize(stream, options);
-    public void Serialize(global::System.IO.Stream stream, in DataBreakpointInfoArguments value, NoJsonSerializerOptions options) => DataBreakpointInfoArgumentsFormatter.Serialize(stream, value, options);
-    public global::System.Threading.Tasks.ValueTask<DataBreakpointInfoArguments> DeserializeAsync(global::System.IO.Stream stream, NoJsonSerializerOptions options, global::System.Threading.CancellationToken cancellationToken) => DataBreakpointInfoArgumentsFormatter.DeserializeAsync(stream, options, cancellationToken);
-    public global::System.Threading.Tasks.ValueTask SerializeAsync(global::System.IO.Stream stream, DataBreakpointInfoArguments value, NoJsonSerializerOptions options, global::System.Threading.CancellationToken cancellationToken) => DataBreakpointInfoArgumentsFormatter.SerializeAsync(stream, value, options, cancellationToken);
 }

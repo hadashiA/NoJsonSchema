@@ -6,7 +6,7 @@ using System.Buffers;
 
 namespace Dap;
 
-public static partial class ScopeFormatter
+static partial class ScopeFormatter
 {
     static global::System.ReadOnlySpan<byte> Name_Name => "\"name\":"u8;
     static global::System.ReadOnlySpan<byte> Name_PresentationHint => "\"presentationHint\":"u8;
@@ -20,27 +20,13 @@ public static partial class ScopeFormatter
     static global::System.ReadOnlySpan<byte> Name_EndLine => "\"endLine\":"u8;
     static global::System.ReadOnlySpan<byte> Name_EndColumn => "\"endColumn\":"u8;
     
-    public static Scope Deserialize(global::System.ReadOnlySpan<byte> utf8Json, NoJsonSerializerOptions? options = null)
+    public static Scope Deserialize(global::System.ReadOnlySpan<byte> utf8Json, NoJsonSerializerOptions options)
     {
-        options ??= NoJsonSerializerOptions.Default;
         var tokenizer = new Utf8JsonTokenizer(utf8Json);
         tokenizer.ReadStartObject();
         var value = new Scope();
         ReadInto(ref tokenizer, value, options);
         return value;
-    }
-    
-    public static Scope Deserialize(byte[] utf8Json, NoJsonSerializerOptions? options = null) => Deserialize((global::System.ReadOnlySpan<byte>)utf8Json, options);
-    
-    public static Scope Deserialize(global::System.IO.Stream stream, NoJsonSerializerOptions? options = null)
-    {
-        return Deserialize(NoJsonStreamUtility.ReadAllBytes(stream), options);
-    }
-    
-    public static async global::System.Threading.Tasks.ValueTask<Scope> DeserializeAsync(global::System.IO.Stream stream, NoJsonSerializerOptions? options = null, global::System.Threading.CancellationToken cancellationToken = default)
-    {
-        var __bytes = await NoJsonStreamUtility.ReadAllBytesAsync(stream, cancellationToken).ConfigureAwait(false);
-        return Deserialize(__bytes, options);
     }
     
     internal static void ReadInto(ref Utf8JsonTokenizer tokenizer, Scope value, NoJsonSerializerOptions options)
@@ -65,7 +51,7 @@ public static partial class ScopeFormatter
                         else
                         
                         {
-                            value.Line = tokenizer.ReadInt64();
+                            value.Line = tokenizer.ReadUInt64();
                         }
                     }
                     else
@@ -102,7 +88,7 @@ public static partial class ScopeFormatter
                         else
                         
                         {
-                            value.Column = tokenizer.ReadInt64();
+                            value.Column = tokenizer.ReadUInt64();
                         }
                     }
                     else
@@ -123,7 +109,7 @@ public static partial class ScopeFormatter
                         else
                         
                         {
-                            value.EndLine = tokenizer.ReadInt64();
+                            value.EndLine = tokenizer.ReadUInt64();
                         }
                     }
                     else
@@ -149,7 +135,7 @@ public static partial class ScopeFormatter
                         else
                         
                         {
-                            value.EndColumn = tokenizer.ReadInt64();
+                            value.EndColumn = tokenizer.ReadUInt64();
                         }
                     }
                     else
@@ -235,33 +221,11 @@ public static partial class ScopeFormatter
         }
     }
     
-    public static void Serialize(global::System.Buffers.IBufferWriter<byte> writer, Scope value, NoJsonSerializerOptions? options = null)
+    public static void Serialize(global::System.Buffers.IBufferWriter<byte> writer, in Scope value, NoJsonSerializerOptions options)
     {
-        options ??= NoJsonSerializerOptions.Default;
         var w = new Utf8JsonBufferWriter(writer);
         WriteValue(ref w, value, options);
         w.Flush();
-    }
-    
-    public static byte[] SerializeToUtf8Bytes(Scope value, NoJsonSerializerOptions? options = null)
-    {
-        var buffer = new global::System.Buffers.ArrayBufferWriter<byte>(256);
-        Serialize(buffer, value, options);
-        return buffer.WrittenSpan.ToArray();
-    }
-    
-    public static void Serialize(global::System.IO.Stream stream, Scope value, NoJsonSerializerOptions? options = null)
-    {
-        var __buffer = new global::System.Buffers.ArrayBufferWriter<byte>(256);
-        Serialize(__buffer, value, options);
-        stream.Write(__buffer.WrittenSpan);
-    }
-    
-    public static async global::System.Threading.Tasks.ValueTask SerializeAsync(global::System.IO.Stream stream, Scope value, NoJsonSerializerOptions? options = null, global::System.Threading.CancellationToken cancellationToken = default)
-    {
-        var __buffer = new global::System.Buffers.ArrayBufferWriter<byte>(256);
-        Serialize(__buffer, value, options);
-        await stream.WriteAsync(__buffer.WrittenMemory, cancellationToken).ConfigureAwait(false);
     }
     
     internal static void WriteValue(ref Utf8JsonBufferWriter w, Scope value, NoJsonSerializerOptions options)
@@ -346,7 +310,7 @@ public static partial class ScopeFormatter
         
         {
             w.WritePropertyNameRaw(Name_Line);
-            w.WriteInt64(value.Line.Value);
+            w.WriteUInt64(value.Line.Value);
         }
         if (value.Column is null)
         {
@@ -361,7 +325,7 @@ public static partial class ScopeFormatter
         
         {
             w.WritePropertyNameRaw(Name_Column);
-            w.WriteInt64(value.Column.Value);
+            w.WriteUInt64(value.Column.Value);
         }
         if (value.EndLine is null)
         {
@@ -376,7 +340,7 @@ public static partial class ScopeFormatter
         
         {
             w.WritePropertyNameRaw(Name_EndLine);
-            w.WriteInt64(value.EndLine.Value);
+            w.WriteUInt64(value.EndLine.Value);
         }
         if (value.EndColumn is null)
         {
@@ -391,21 +355,8 @@ public static partial class ScopeFormatter
         
         {
             w.WritePropertyNameRaw(Name_EndColumn);
-            w.WriteInt64(value.EndColumn.Value);
+            w.WriteUInt64(value.EndColumn.Value);
         }
         w.WriteEndObject();
     }
-}
-
-sealed class ScopeFormatterAdapter : INoJsonFormatter<Scope>
-{
-    public static readonly ScopeFormatterAdapter Instance = new();
-    ScopeFormatterAdapter() { }
-    
-    public Scope Deserialize(global::System.ReadOnlySpan<byte> utf8Json, NoJsonSerializerOptions options) => ScopeFormatter.Deserialize(utf8Json, options);
-    public void Serialize(global::System.Buffers.IBufferWriter<byte> writer, in Scope value, NoJsonSerializerOptions options) => ScopeFormatter.Serialize(writer, value, options);
-    public Scope Deserialize(global::System.IO.Stream stream, NoJsonSerializerOptions options) => ScopeFormatter.Deserialize(stream, options);
-    public void Serialize(global::System.IO.Stream stream, in Scope value, NoJsonSerializerOptions options) => ScopeFormatter.Serialize(stream, value, options);
-    public global::System.Threading.Tasks.ValueTask<Scope> DeserializeAsync(global::System.IO.Stream stream, NoJsonSerializerOptions options, global::System.Threading.CancellationToken cancellationToken) => ScopeFormatter.DeserializeAsync(stream, options, cancellationToken);
-    public global::System.Threading.Tasks.ValueTask SerializeAsync(global::System.IO.Stream stream, Scope value, NoJsonSerializerOptions options, global::System.Threading.CancellationToken cancellationToken) => ScopeFormatter.SerializeAsync(stream, value, options, cancellationToken);
 }

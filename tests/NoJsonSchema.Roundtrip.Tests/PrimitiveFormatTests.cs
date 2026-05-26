@@ -52,21 +52,9 @@ public class PrimitiveFormatTests(ITestOutputHelper output)
         return Assembly.Load(ms.ToArray());
     }
 
-    /// <summary>Roundtrip helper: deserialize JSON, mutate via reflection, reserialize, compare.</summary>
+    /// <summary>Roundtrip helper: deserialize JSON via the public Serializer, reserialize, compare.</summary>
     static (object instance, string serialized) Roundtrip(Assembly asm, string ns, string typeName, string json)
-    {
-        var type = asm.GetType($"{ns}.{typeName}") ?? throw new InvalidOperationException($"type {typeName} not found");
-        var formatter = asm.GetType($"{ns}.{typeName}Formatter") ?? throw new InvalidOperationException("formatter not found");
-
-        var deserialize = formatter.GetMethod("Deserialize", [typeof(byte[]), asm.GetType($"{ns}.NoJsonSerializerOptions")!])
-            ?? throw new InvalidOperationException("Deserialize overload not found");
-        var serializeToBytes = formatter.GetMethod("SerializeToUtf8Bytes", [type, asm.GetType($"{ns}.NoJsonSerializerOptions")!])
-            ?? throw new InvalidOperationException("SerializeToUtf8Bytes overload not found");
-
-        var instance = deserialize.Invoke(null, [Encoding.UTF8.GetBytes(json), null])!;
-        var roundtripped = (byte[])serializeToBytes.Invoke(null, [instance, null])!;
-        return (instance, Encoding.UTF8.GetString(roundtripped));
-    }
+        => RoundtripReflection.Roundtrip(asm, ns, typeName, json);
 
     [Fact]
     public void IntegerWidths_RoundTrip()

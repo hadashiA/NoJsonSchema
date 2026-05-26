@@ -16,12 +16,12 @@ public partial class StackTraceArguments
     /// <summary>
     /// The index of the first frame to return; if omitted frames start at 0.
     /// </summary>
-    public long? StartFrame { get; set; }
+    public uint? StartFrame { get; set; }
     
     /// <summary>
     /// The maximum number of frames to return. If levels is not specified or 0, all frames are returned.
     /// </summary>
-    public long? Levels { get; set; }
+    public uint? Levels { get; set; }
     
     /// <summary>
     /// Specifies details on how to format the returned `StackFrame.name`. The debug adapter may format requested details in any way that would make sense to a developer.

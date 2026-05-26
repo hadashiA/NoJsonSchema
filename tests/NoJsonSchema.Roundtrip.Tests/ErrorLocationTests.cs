@@ -39,11 +39,11 @@ public class ErrorLocationTests(ITestOutputHelper output)
         return (Assembly.Load(ms.ToArray()), result);
     }
 
-    static Exception InvokeAndUnwrap(MethodInfo m, object?[] args)
+    static Exception DeserializeAndUnwrap(Assembly asm, string ns, string typeName, byte[] bytes)
     {
         try
         {
-            m.Invoke(null, args);
+            RoundtripReflection.Deserialize(asm, ns, typeName, bytes);
             throw new Xunit.Sdk.XunitException("Expected exception but call returned successfully.");
         }
         catch (TargetInvocationException tie)
@@ -71,15 +71,10 @@ public class ErrorLocationTests(ITestOutputHelper output)
     public void MalformedJson_ReportsLineAndColumn()
     {
         var (asm, _) = Compile(Schema, "ErrLoc1");
-        var formatter = asm.GetType("ErrLoc1.UserFormatter")!;
-        var optsType = asm.GetType("ErrLoc1.NoJsonSerializerOptions")!;
-        var deserialize = formatter.GetMethod("Deserialize",
-            BindingFlags.Public | BindingFlags.Static, null, [typeof(byte[]), optsType], null)!;
 
         // The garbage `???` lives on line 3, starting at column 1.
         var json = "{\n  \"name\": \"Ada\",\n???\n}\n";
-        var bytes = Encoding.UTF8.GetBytes(json);
-        var ex = InvokeAndUnwrap(deserialize, [bytes, null]);
+        var ex = DeserializeAndUnwrap(asm, "ErrLoc1", "User", Encoding.UTF8.GetBytes(json));
 
         output.WriteLine(ex.Message);
         Assert.Contains("line 3", ex.Message);
@@ -106,15 +101,10 @@ public class ErrorLocationTests(ITestOutputHelper output)
         }
         """;
         var (asm, _) = Compile(strictSchema, "ErrLoc2");
-        var formatter = asm.GetType("ErrLoc2.StrictFormatter")!;
-        var optsType = asm.GetType("ErrLoc2.NoJsonSerializerOptions")!;
-        var deserialize = formatter.GetMethod("Deserialize",
-            BindingFlags.Public | BindingFlags.Static, null, [typeof(byte[]), optsType], null)!;
 
         // unknown "extra" sits on line 3.
         var json = "{\n  \"a\": \"x\",\n  \"extra\": 1\n}\n";
-        var bytes = Encoding.UTF8.GetBytes(json);
-        var ex = InvokeAndUnwrap(deserialize, [bytes, null]);
+        var ex = DeserializeAndUnwrap(asm, "ErrLoc2", "Strict", Encoding.UTF8.GetBytes(json));
 
         output.WriteLine(ex.Message);
         Assert.Contains("Unknown property", ex.Message);
@@ -129,15 +119,10 @@ public class ErrorLocationTests(ITestOutputHelper output)
     public void TypeMismatch_OnSecondLine_ReportsLine2()
     {
         var (asm, _) = Compile(Schema, "ErrLoc3");
-        var formatter = asm.GetType("ErrLoc3.UserFormatter")!;
-        var optsType = asm.GetType("ErrLoc3.NoJsonSerializerOptions")!;
-        var deserialize = formatter.GetMethod("Deserialize",
-            BindingFlags.Public | BindingFlags.Static, null, [typeof(byte[]), optsType], null)!;
 
         // age expects an integer, but gets a string on line 2.
         var json = "{\n  \"age\": \"not-a-number\",\n  \"name\": \"Ada\"\n}";
-        var bytes = Encoding.UTF8.GetBytes(json);
-        var ex = InvokeAndUnwrap(deserialize, [bytes, null]);
+        var ex = DeserializeAndUnwrap(asm, "ErrLoc3", "User", Encoding.UTF8.GetBytes(json));
 
         output.WriteLine(ex.Message);
         var exceptionType = ex.GetType();

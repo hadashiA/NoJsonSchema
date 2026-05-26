@@ -6,29 +6,16 @@ using System.Buffers;
 
 namespace Dap;
 
-public static partial class ProcessEventBodyStartMethodFormatter
+static partial class ProcessEventBodyStartMethodFormatter
 {
     static global::System.ReadOnlySpan<byte> Member_Launch => "launch"u8;
     static global::System.ReadOnlySpan<byte> Member_Attach => "attach"u8;
     static global::System.ReadOnlySpan<byte> Member_AttachForSuspendedLaunch => "attachForSuspendedLaunch"u8;
     
-    public static ProcessEventBodyStartMethod Deserialize(global::System.ReadOnlySpan<byte> utf8Json, NoJsonSerializerOptions? options = null)
+    public static ProcessEventBodyStartMethod Deserialize(global::System.ReadOnlySpan<byte> utf8Json, NoJsonSerializerOptions options)
     {
         var tokenizer = new Utf8JsonTokenizer(utf8Json);
         return ReadValue(ref tokenizer);
-    }
-    
-    public static ProcessEventBodyStartMethod Deserialize(byte[] utf8Json, NoJsonSerializerOptions? options = null) => Deserialize((global::System.ReadOnlySpan<byte>)utf8Json, options);
-    
-    public static ProcessEventBodyStartMethod Deserialize(global::System.IO.Stream stream, NoJsonSerializerOptions? options = null)
-    {
-        return Deserialize(NoJsonStreamUtility.ReadAllBytes(stream), options);
-    }
-    
-    public static async global::System.Threading.Tasks.ValueTask<ProcessEventBodyStartMethod> DeserializeAsync(global::System.IO.Stream stream, NoJsonSerializerOptions? options = null, global::System.Threading.CancellationToken cancellationToken = default)
-    {
-        var __bytes = await NoJsonStreamUtility.ReadAllBytesAsync(stream, cancellationToken).ConfigureAwait(false);
-        return Deserialize(__bytes, options);
     }
     
     internal static ProcessEventBodyStartMethod ReadValue(ref Utf8JsonTokenizer tokenizer)
@@ -45,32 +32,11 @@ public static partial class ProcessEventBodyStartMethodFormatter
         return default; // unreachable
     }
     
-    public static void Serialize(global::System.Buffers.IBufferWriter<byte> writer, ProcessEventBodyStartMethod value, NoJsonSerializerOptions? options = null)
+    public static void Serialize(global::System.Buffers.IBufferWriter<byte> writer, in ProcessEventBodyStartMethod value, NoJsonSerializerOptions options)
     {
         var w = new Utf8JsonBufferWriter(writer);
         WriteValue(ref w, value);
         w.Flush();
-    }
-    
-    public static byte[] SerializeToUtf8Bytes(ProcessEventBodyStartMethod value, NoJsonSerializerOptions? options = null)
-    {
-        var buffer = new global::System.Buffers.ArrayBufferWriter<byte>(16);
-        Serialize(buffer, value, options);
-        return buffer.WrittenSpan.ToArray();
-    }
-    
-    public static void Serialize(global::System.IO.Stream stream, ProcessEventBodyStartMethod value, NoJsonSerializerOptions? options = null)
-    {
-        var __buffer = new global::System.Buffers.ArrayBufferWriter<byte>(16);
-        Serialize(__buffer, value, options);
-        stream.Write(__buffer.WrittenSpan);
-    }
-    
-    public static async global::System.Threading.Tasks.ValueTask SerializeAsync(global::System.IO.Stream stream, ProcessEventBodyStartMethod value, NoJsonSerializerOptions? options = null, global::System.Threading.CancellationToken cancellationToken = default)
-    {
-        var __buffer = new global::System.Buffers.ArrayBufferWriter<byte>(16);
-        Serialize(__buffer, value, options);
-        await stream.WriteAsync(__buffer.WrittenMemory, cancellationToken).ConfigureAwait(false);
     }
     
     internal static void WriteValue(ref Utf8JsonBufferWriter w, ProcessEventBodyStartMethod value)
@@ -83,17 +49,4 @@ public static partial class ProcessEventBodyStartMethodFormatter
             default: throw new global::System.InvalidOperationException("Unknown ProcessEventBodyStartMethod value: " + value);
         }
     }
-}
-
-sealed class ProcessEventBodyStartMethodFormatterAdapter : INoJsonFormatter<ProcessEventBodyStartMethod>
-{
-    public static readonly ProcessEventBodyStartMethodFormatterAdapter Instance = new();
-    ProcessEventBodyStartMethodFormatterAdapter() { }
-    
-    public ProcessEventBodyStartMethod Deserialize(global::System.ReadOnlySpan<byte> utf8Json, NoJsonSerializerOptions options) => ProcessEventBodyStartMethodFormatter.Deserialize(utf8Json, options);
-    public void Serialize(global::System.Buffers.IBufferWriter<byte> writer, in ProcessEventBodyStartMethod value, NoJsonSerializerOptions options) => ProcessEventBodyStartMethodFormatter.Serialize(writer, value, options);
-    public ProcessEventBodyStartMethod Deserialize(global::System.IO.Stream stream, NoJsonSerializerOptions options) => ProcessEventBodyStartMethodFormatter.Deserialize(stream, options);
-    public void Serialize(global::System.IO.Stream stream, in ProcessEventBodyStartMethod value, NoJsonSerializerOptions options) => ProcessEventBodyStartMethodFormatter.Serialize(stream, value, options);
-    public global::System.Threading.Tasks.ValueTask<ProcessEventBodyStartMethod> DeserializeAsync(global::System.IO.Stream stream, NoJsonSerializerOptions options, global::System.Threading.CancellationToken cancellationToken) => ProcessEventBodyStartMethodFormatter.DeserializeAsync(stream, options, cancellationToken);
-    public global::System.Threading.Tasks.ValueTask SerializeAsync(global::System.IO.Stream stream, ProcessEventBodyStartMethod value, NoJsonSerializerOptions options, global::System.Threading.CancellationToken cancellationToken) => ProcessEventBodyStartMethodFormatter.SerializeAsync(stream, value, options, cancellationToken);
 }

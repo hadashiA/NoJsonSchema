@@ -6,33 +6,19 @@ using System.Buffers;
 
 namespace Dap;
 
-public static partial class ExceptionFilterOptionsFormatter
+static partial class ExceptionFilterOptionsFormatter
 {
     static global::System.ReadOnlySpan<byte> Name_FilterId => "\"filterId\":"u8;
     static global::System.ReadOnlySpan<byte> Name_Condition => "\"condition\":"u8;
     static global::System.ReadOnlySpan<byte> Name_Mode => "\"mode\":"u8;
     
-    public static ExceptionFilterOptions Deserialize(global::System.ReadOnlySpan<byte> utf8Json, NoJsonSerializerOptions? options = null)
+    public static ExceptionFilterOptions Deserialize(global::System.ReadOnlySpan<byte> utf8Json, NoJsonSerializerOptions options)
     {
-        options ??= NoJsonSerializerOptions.Default;
         var tokenizer = new Utf8JsonTokenizer(utf8Json);
         tokenizer.ReadStartObject();
         var value = new ExceptionFilterOptions();
         ReadInto(ref tokenizer, value, options);
         return value;
-    }
-    
-    public static ExceptionFilterOptions Deserialize(byte[] utf8Json, NoJsonSerializerOptions? options = null) => Deserialize((global::System.ReadOnlySpan<byte>)utf8Json, options);
-    
-    public static ExceptionFilterOptions Deserialize(global::System.IO.Stream stream, NoJsonSerializerOptions? options = null)
-    {
-        return Deserialize(NoJsonStreamUtility.ReadAllBytes(stream), options);
-    }
-    
-    public static async global::System.Threading.Tasks.ValueTask<ExceptionFilterOptions> DeserializeAsync(global::System.IO.Stream stream, NoJsonSerializerOptions? options = null, global::System.Threading.CancellationToken cancellationToken = default)
-    {
-        var __bytes = await NoJsonStreamUtility.ReadAllBytesAsync(stream, cancellationToken).ConfigureAwait(false);
-        return Deserialize(__bytes, options);
     }
     
     internal static void ReadInto(ref Utf8JsonTokenizer tokenizer, ExceptionFilterOptions value, NoJsonSerializerOptions options)
@@ -104,33 +90,11 @@ public static partial class ExceptionFilterOptionsFormatter
         }
     }
     
-    public static void Serialize(global::System.Buffers.IBufferWriter<byte> writer, ExceptionFilterOptions value, NoJsonSerializerOptions? options = null)
+    public static void Serialize(global::System.Buffers.IBufferWriter<byte> writer, in ExceptionFilterOptions value, NoJsonSerializerOptions options)
     {
-        options ??= NoJsonSerializerOptions.Default;
         var w = new Utf8JsonBufferWriter(writer);
         WriteValue(ref w, value, options);
         w.Flush();
-    }
-    
-    public static byte[] SerializeToUtf8Bytes(ExceptionFilterOptions value, NoJsonSerializerOptions? options = null)
-    {
-        var buffer = new global::System.Buffers.ArrayBufferWriter<byte>(256);
-        Serialize(buffer, value, options);
-        return buffer.WrittenSpan.ToArray();
-    }
-    
-    public static void Serialize(global::System.IO.Stream stream, ExceptionFilterOptions value, NoJsonSerializerOptions? options = null)
-    {
-        var __buffer = new global::System.Buffers.ArrayBufferWriter<byte>(256);
-        Serialize(__buffer, value, options);
-        stream.Write(__buffer.WrittenSpan);
-    }
-    
-    public static async global::System.Threading.Tasks.ValueTask SerializeAsync(global::System.IO.Stream stream, ExceptionFilterOptions value, NoJsonSerializerOptions? options = null, global::System.Threading.CancellationToken cancellationToken = default)
-    {
-        var __buffer = new global::System.Buffers.ArrayBufferWriter<byte>(256);
-        Serialize(__buffer, value, options);
-        await stream.WriteAsync(__buffer.WrittenMemory, cancellationToken).ConfigureAwait(false);
     }
     
     internal static void WriteValue(ref Utf8JsonBufferWriter w, ExceptionFilterOptions value, NoJsonSerializerOptions options)
@@ -170,17 +134,4 @@ public static partial class ExceptionFilterOptionsFormatter
         }
         w.WriteEndObject();
     }
-}
-
-sealed class ExceptionFilterOptionsFormatterAdapter : INoJsonFormatter<ExceptionFilterOptions>
-{
-    public static readonly ExceptionFilterOptionsFormatterAdapter Instance = new();
-    ExceptionFilterOptionsFormatterAdapter() { }
-    
-    public ExceptionFilterOptions Deserialize(global::System.ReadOnlySpan<byte> utf8Json, NoJsonSerializerOptions options) => ExceptionFilterOptionsFormatter.Deserialize(utf8Json, options);
-    public void Serialize(global::System.Buffers.IBufferWriter<byte> writer, in ExceptionFilterOptions value, NoJsonSerializerOptions options) => ExceptionFilterOptionsFormatter.Serialize(writer, value, options);
-    public ExceptionFilterOptions Deserialize(global::System.IO.Stream stream, NoJsonSerializerOptions options) => ExceptionFilterOptionsFormatter.Deserialize(stream, options);
-    public void Serialize(global::System.IO.Stream stream, in ExceptionFilterOptions value, NoJsonSerializerOptions options) => ExceptionFilterOptionsFormatter.Serialize(stream, value, options);
-    public global::System.Threading.Tasks.ValueTask<ExceptionFilterOptions> DeserializeAsync(global::System.IO.Stream stream, NoJsonSerializerOptions options, global::System.Threading.CancellationToken cancellationToken) => ExceptionFilterOptionsFormatter.DeserializeAsync(stream, options, cancellationToken);
-    public global::System.Threading.Tasks.ValueTask SerializeAsync(global::System.IO.Stream stream, ExceptionFilterOptions value, NoJsonSerializerOptions options, global::System.Threading.CancellationToken cancellationToken) => ExceptionFilterOptionsFormatter.SerializeAsync(stream, value, options, cancellationToken);
 }

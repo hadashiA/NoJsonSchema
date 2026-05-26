@@ -3,7 +3,6 @@
 
 using System;
 using System.Buffers;
-using System.IO;
 
 namespace Dap;
 
@@ -14,51 +13,6 @@ public sealed class NoJsonSerializerOptions
     public bool StrictExtraProperties { get; init; }
     public bool WriteIndented { get; init; }
     public bool SkipNullProperties { get; init; } = true;
-}
-
-/// <summary>
-/// Per-type formatter contract — the generic <c>{Ns}Serializer&lt;T&gt;</c> dispatch goes through a
-/// <c>Cache&lt;T&gt;</c> static-initialised once per CLR generic instantiation, then calls into one
-/// of these adapters. Keeps the hot path branch-free without sacrificing extensibility.
-/// </summary>
-public interface INoJsonFormatter<T>
-{
-    T Deserialize(global::System.ReadOnlySpan<byte> utf8Json, NoJsonSerializerOptions options);
-    void Serialize(global::System.Buffers.IBufferWriter<byte> writer, in T value, NoJsonSerializerOptions options);
-
-    T Deserialize(global::System.IO.Stream stream, NoJsonSerializerOptions options);
-    void Serialize(global::System.IO.Stream stream, in T value, NoJsonSerializerOptions options);
-
-    global::System.Threading.Tasks.ValueTask<T> DeserializeAsync(global::System.IO.Stream stream, NoJsonSerializerOptions options, global::System.Threading.CancellationToken cancellationToken);
-    global::System.Threading.Tasks.ValueTask SerializeAsync(global::System.IO.Stream stream, T value, NoJsonSerializerOptions options, global::System.Threading.CancellationToken cancellationToken);
-}
-
-/// <summary>
-/// Shared Stream &lt;-&gt; byte[] helpers. The fast path for in-memory <see cref="global::System.IO.MemoryStream"/>
-/// avoids an extra copy; otherwise the full payload is collected once before parsing.
-/// </summary>
-internal static class NoJsonStreamUtility
-{
-    public static byte[] ReadAllBytes(global::System.IO.Stream stream)
-    {
-        if (stream is global::System.IO.MemoryStream ms && ms.TryGetBuffer(out var seg))
-        {
-            var copy = new byte[seg.Count];
-            global::System.Buffer.BlockCopy(seg.Array!, seg.Offset, copy, 0, seg.Count);
-            return copy;
-        }
-        using var dest = new global::System.IO.MemoryStream();
-        stream.CopyTo(dest);
-        return dest.ToArray();
-    }
-
-    public static async global::System.Threading.Tasks.ValueTask<byte[]> ReadAllBytesAsync(
-        global::System.IO.Stream stream, global::System.Threading.CancellationToken cancellationToken)
-    {
-        using var dest = new global::System.IO.MemoryStream();
-        await stream.CopyToAsync(dest, 81920, cancellationToken).ConfigureAwait(false);
-        return dest.ToArray();
-    }
 }
 
 public sealed class NoJsonFormatException : global::System.Exception
@@ -92,7 +46,14 @@ public sealed class NoJsonFormatException : global::System.Exception
 /// </summary>
 ref struct Utf8JsonTokenizer
 {
+#if NET7_0_OR_GREATER
+    // C# 11 ref-byte field: zero indirection on hot reads.
     readonly ref byte head;
+#else
+    // Pre-net7 targets (netstandard 2.1) don't allow ref fields. Hold the span and recover the
+    // ref on-demand via MemoryMarshal.GetReference — JIT inlines `HeadRef()` to the same code.
+    readonly global::System.ReadOnlySpan<byte> input;
+#endif
     readonly int length;
     int pos;
     int valueStart;
@@ -101,13 +62,26 @@ ref struct Utf8JsonTokenizer
 
     public Utf8JsonTokenizer(global::System.ReadOnlySpan<byte> input)
     {
+#if NET7_0_OR_GREATER
         head = ref global::System.Runtime.InteropServices.MemoryMarshal.GetReference(input);
+#else
+        this.input = input;
+#endif
         length = input.Length;
         pos = 0;
         valueStart = 0;
         valueEnd = 0;
         valueHasEscape = false;
     }
+
+    /// <summary>Recover a writable <c>ref byte</c> at index 0 of the input span.</summary>
+    [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
+    ref byte HeadRef() =>
+#if NET7_0_OR_GREATER
+        ref head;
+#else
+        ref global::System.Runtime.InteropServices.MemoryMarshal.GetReference(input);
+#endif
 
     public int Position
     {
@@ -258,6 +232,42 @@ ref struct Utf8JsonTokenizer
         return false; // unreachable — the C# flow analyser doesn't honour [DoesNotReturn] for CS0161.
     }
 
+    public sbyte ReadSByte()
+    {
+        ReadNumberValue();
+        if (!global::System.Buffers.Text.Utf8Parser.TryParse(
+                SliceFrom(valueStart, valueEnd - valueStart), out sbyte v, out _))
+            ThrowFormatException("Invalid int8");
+        return v;
+    }
+
+    public byte ReadByte()
+    {
+        ReadNumberValue();
+        if (!global::System.Buffers.Text.Utf8Parser.TryParse(
+                SliceFrom(valueStart, valueEnd - valueStart), out byte v, out _))
+            ThrowFormatException("Invalid uint8");
+        return v;
+    }
+
+    public short ReadInt16()
+    {
+        ReadNumberValue();
+        if (!global::System.Buffers.Text.Utf8Parser.TryParse(
+                SliceFrom(valueStart, valueEnd - valueStart), out short v, out _))
+            ThrowFormatException("Invalid int16");
+        return v;
+    }
+
+    public ushort ReadUInt16()
+    {
+        ReadNumberValue();
+        if (!global::System.Buffers.Text.Utf8Parser.TryParse(
+                SliceFrom(valueStart, valueEnd - valueStart), out ushort v, out _))
+            ThrowFormatException("Invalid uint16");
+        return v;
+    }
+
     public int ReadInt32()
     {
         ReadNumberValue();
@@ -267,12 +277,30 @@ ref struct Utf8JsonTokenizer
         return v;
     }
 
+    public uint ReadUInt32()
+    {
+        ReadNumberValue();
+        if (!global::System.Buffers.Text.Utf8Parser.TryParse(
+                SliceFrom(valueStart, valueEnd - valueStart), out uint v, out _))
+            ThrowFormatException("Invalid uint32");
+        return v;
+    }
+
     public long ReadInt64()
     {
         ReadNumberValue();
         if (!global::System.Buffers.Text.Utf8Parser.TryParse(
                 SliceFrom(valueStart, valueEnd - valueStart), out long v, out _))
             ThrowFormatException("Invalid int64");
+        return v;
+    }
+
+    public ulong ReadUInt64()
+    {
+        ReadNumberValue();
+        if (!global::System.Buffers.Text.Utf8Parser.TryParse(
+                SliceFrom(valueStart, valueEnd - valueStart), out ulong v, out _))
+            ThrowFormatException("Invalid uint64");
         return v;
     }
 
@@ -308,6 +336,47 @@ ref struct Utf8JsonTokenizer
         if (!global::System.Guid.TryParse(s, out var v))
             ThrowFormatException("Invalid uuid '" + s + "'");
         return v;
+    }
+
+#if NET6_0_OR_GREATER
+    public global::System.DateOnly ReadDateOnly()
+    {
+        var s = ReadString();
+        if (!global::System.DateOnly.TryParse(s, global::System.Globalization.CultureInfo.InvariantCulture, global::System.Globalization.DateTimeStyles.None, out var v))
+            ThrowFormatException("Invalid date '" + s + "'");
+        return v;
+    }
+
+    public global::System.TimeOnly ReadTimeOnly()
+    {
+        var s = ReadString();
+        if (!global::System.TimeOnly.TryParse(s, global::System.Globalization.CultureInfo.InvariantCulture, global::System.Globalization.DateTimeStyles.None, out var v))
+            ThrowFormatException("Invalid time '" + s + "'");
+        return v;
+    }
+#endif
+
+    public global::System.TimeSpan ReadTimeSpan()
+    {
+        var s = ReadString();
+        // ISO 8601 duration ("PT1H30M") via XmlConvert — JSON Schema's `format: duration` mandates ISO 8601.
+        try { return global::System.Xml.XmlConvert.ToTimeSpan(s); }
+        catch (global::System.FormatException) { ThrowFormatException("Invalid duration '" + s + "'"); return default; }
+    }
+
+    public global::System.Uri ReadUri()
+    {
+        var s = ReadString();
+        if (!global::System.Uri.TryCreate(s, global::System.UriKind.RelativeOrAbsolute, out var v))
+            ThrowFormatException("Invalid uri '" + s + "'");
+        return v;
+    }
+
+    public byte[] ReadByteArray()
+    {
+        var s = ReadString();
+        try { return global::System.Convert.FromBase64String(s); }
+        catch (global::System.FormatException) { ThrowFormatException("Invalid base64"); return []; }
     }
 
     // ----- Discriminator peek (polymorphic dispatch) ---------------------------------------
@@ -461,12 +530,12 @@ ref struct Utf8JsonTokenizer
     }
 
     [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
-    byte ByteAt(int offset) => global::System.Runtime.CompilerServices.Unsafe.Add(ref head, offset);
+    byte ByteAt(int offset) => global::System.Runtime.CompilerServices.Unsafe.Add(ref HeadRef(), offset);
 
     [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
     global::System.ReadOnlySpan<byte> SliceFrom(int offset, int len) =>
         global::System.Runtime.InteropServices.MemoryMarshal.CreateReadOnlySpan(
-            ref global::System.Runtime.CompilerServices.Unsafe.Add(ref head, offset),
+            ref global::System.Runtime.CompilerServices.Unsafe.Add(ref HeadRef(), offset),
             len);
 
     [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
@@ -597,7 +666,13 @@ ref struct Utf8JsonTokenizer
 ref struct Utf8JsonBufferWriter
 {
     readonly global::System.Buffers.IBufferWriter<byte> writer;
-    ref byte spanHead;
+#if NET7_0_OR_GREATER
+    // C# 11 ref-byte field — moves forward via `Unsafe.Add` on every Advance.
+    ref byte bufferReference;
+#else
+    // Pre-net7: hold the rented span (no separate offset — slicing advances the view).
+    global::System.Span<byte> bufferReference;
+#endif
     int spanRemaining;
     int pending;
     bool needsSeparator;
@@ -605,7 +680,11 @@ ref struct Utf8JsonBufferWriter
     public Utf8JsonBufferWriter(global::System.Buffers.IBufferWriter<byte> writer)
     {
         this.writer = writer;
-        spanHead = ref global::System.Runtime.CompilerServices.Unsafe.NullRef<byte>();
+#if NET7_0_OR_GREATER
+        bufferReference = ref global::System.Runtime.CompilerServices.Unsafe.NullRef<byte>();
+#else
+        bufferReference = default;
+#endif
         spanRemaining = 0;
         pending = 0;
         needsSeparator = false;
@@ -616,16 +695,33 @@ ref struct Utf8JsonBufferWriter
         if (pending > 0)
         {
             writer.Advance(pending);
-            spanHead = ref global::System.Runtime.CompilerServices.Unsafe.NullRef<byte>();
+#if NET7_0_OR_GREATER
+            bufferReference = ref global::System.Runtime.CompilerServices.Unsafe.NullRef<byte>();
+#else
+            bufferReference = default;
+#endif
             spanRemaining = 0;
             pending = 0;
         }
     }
 
-    public void WriteStartObject() { MaybeSeparator(); WriteByte((byte)'{'); needsSeparator = false; }
-    public void WriteEndObject()   { needsSeparator = false; WriteByte((byte)'}'); needsSeparator = true; }
-    public void WriteStartArray()  { MaybeSeparator(); WriteByte((byte)'['); needsSeparator = false; }
-    public void WriteEndArray()    { needsSeparator = false; WriteByte((byte)']'); needsSeparator = true; }
+    /// <summary>Writable <c>ref byte</c> at <paramref name="offset"/> past the current write head.
+    /// JIT-inlines to a single ADD on net7+, and to <c>MemoryMarshal.GetReference + offset</c> on
+    /// netstandard. Callers use it as the LHS of an assignment (e.g. <c>GetByte(3) = b;</c>).</summary>
+    [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
+    ref byte GetByte(int offset) =>
+#if NET7_0_OR_GREATER
+        ref global::System.Runtime.CompilerServices.Unsafe.Add(ref bufferReference, offset);
+#else
+        ref global::System.Runtime.CompilerServices.Unsafe.Add(
+            ref global::System.Runtime.InteropServices.MemoryMarshal.GetReference(bufferReference),
+            offset);
+#endif
+
+    public void WriteStartObject() { MaybeSeparator(); AppendByte((byte)'{'); needsSeparator = false; }
+    public void WriteEndObject()   { needsSeparator = false; AppendByte((byte)'}'); needsSeparator = true; }
+    public void WriteStartArray()  { MaybeSeparator(); AppendByte((byte)'['); needsSeparator = false; }
+    public void WriteEndArray()    { needsSeparator = false; AppendByte((byte)']'); needsSeparator = true; }
 
     [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
     public void WritePropertyNameRaw(global::System.ReadOnlySpan<byte> nameWithQuotesAndColon)
@@ -642,9 +738,9 @@ ref struct Utf8JsonBufferWriter
     public void WriteRawStringValue(scoped global::System.ReadOnlySpan<byte> contentInsideQuotes)
     {
         MaybeSeparator();
-        WriteByte((byte)'"');
+        AppendByte((byte)'"');
         Append(contentInsideQuotes);
-        WriteByte((byte)'"');
+        AppendByte((byte)'"');
         needsSeparator = true;
     }
 
@@ -663,6 +759,74 @@ ref struct Utf8JsonBufferWriter
         WriteString(v.ToString("D", global::System.Globalization.CultureInfo.InvariantCulture));
     }
 
+#if NET6_0_OR_GREATER
+    public void WriteDateOnly(global::System.DateOnly v)
+    {
+        WriteString(v.ToString("yyyy-MM-dd", global::System.Globalization.CultureInfo.InvariantCulture));
+    }
+
+    public void WriteTimeOnly(global::System.TimeOnly v)
+    {
+        WriteString(v.ToString("O", global::System.Globalization.CultureInfo.InvariantCulture));
+    }
+#endif
+
+    public void WriteTimeSpan(global::System.TimeSpan v)
+    {
+        // Emit ISO 8601 duration (`P…T…`) so it round-trips through `format: duration` consumers.
+        WriteString(global::System.Xml.XmlConvert.ToString(v));
+    }
+
+    public void WriteUri(global::System.Uri v)
+    {
+        WriteString(v.ToString());
+    }
+
+    public void WriteByteArray(byte[] v)
+    {
+        WriteString(global::System.Convert.ToBase64String(v));
+    }
+
+    public void WriteSByte(sbyte v)
+    {
+        MaybeSeparator();
+        global::System.Span<byte> tmp = stackalloc byte[8];
+        if (!global::System.Buffers.Text.Utf8Formatter.TryFormat(v, tmp, out int written))
+            throw new global::System.InvalidOperationException("sbyte format");
+        Append(tmp.Slice(0, written));
+        needsSeparator = true;
+    }
+
+    public void WriteByte(byte v)
+    {
+        MaybeSeparator();
+        global::System.Span<byte> tmp = stackalloc byte[8];
+        if (!global::System.Buffers.Text.Utf8Formatter.TryFormat(v, tmp, out int written))
+            throw new global::System.InvalidOperationException("byte format");
+        Append(tmp.Slice(0, written));
+        needsSeparator = true;
+    }
+
+    public void WriteInt16(short v)
+    {
+        MaybeSeparator();
+        global::System.Span<byte> tmp = stackalloc byte[8];
+        if (!global::System.Buffers.Text.Utf8Formatter.TryFormat(v, tmp, out int written))
+            throw new global::System.InvalidOperationException("short format");
+        Append(tmp.Slice(0, written));
+        needsSeparator = true;
+    }
+
+    public void WriteUInt16(ushort v)
+    {
+        MaybeSeparator();
+        global::System.Span<byte> tmp = stackalloc byte[8];
+        if (!global::System.Buffers.Text.Utf8Formatter.TryFormat(v, tmp, out int written))
+            throw new global::System.InvalidOperationException("ushort format");
+        Append(tmp.Slice(0, written));
+        needsSeparator = true;
+    }
+
     public void WriteInt32(int v)
     {
         MaybeSeparator();
@@ -673,12 +837,32 @@ ref struct Utf8JsonBufferWriter
         needsSeparator = true;
     }
 
+    public void WriteUInt32(uint v)
+    {
+        MaybeSeparator();
+        global::System.Span<byte> tmp = stackalloc byte[16];
+        if (!global::System.Buffers.Text.Utf8Formatter.TryFormat(v, tmp, out int written))
+            throw new global::System.InvalidOperationException("uint format");
+        Append(tmp.Slice(0, written));
+        needsSeparator = true;
+    }
+
     public void WriteInt64(long v)
     {
         MaybeSeparator();
         global::System.Span<byte> tmp = stackalloc byte[24];
         if (!global::System.Buffers.Text.Utf8Formatter.TryFormat(v, tmp, out int written))
             throw new global::System.InvalidOperationException("long format");
+        Append(tmp.Slice(0, written));
+        needsSeparator = true;
+    }
+
+    public void WriteUInt64(ulong v)
+    {
+        MaybeSeparator();
+        global::System.Span<byte> tmp = stackalloc byte[24];
+        if (!global::System.Buffers.Text.Utf8Formatter.TryFormat(v, tmp, out int written))
+            throw new global::System.InvalidOperationException("ulong format");
         Append(tmp.Slice(0, written));
         needsSeparator = true;
     }
@@ -706,7 +890,7 @@ ref struct Utf8JsonBufferWriter
     public void WriteString(string value)
     {
         MaybeSeparator();
-        WriteByte((byte)'"');
+        AppendByte((byte)'"');
 
         var chars = value.AsSpan();
         int safeStart = 0;
@@ -730,12 +914,12 @@ ref struct Utf8JsonBufferWriter
                     if (c < 0x20)
                     {
                         Ensure(6);
-                        global::System.Runtime.CompilerServices.Unsafe.Add(ref spanHead, 0) = (byte)'\\';
-                        global::System.Runtime.CompilerServices.Unsafe.Add(ref spanHead, 1) = (byte)'u';
-                        global::System.Runtime.CompilerServices.Unsafe.Add(ref spanHead, 2) = (byte)'0';
-                        global::System.Runtime.CompilerServices.Unsafe.Add(ref spanHead, 3) = (byte)'0';
-                        global::System.Runtime.CompilerServices.Unsafe.Add(ref spanHead, 4) = HexByte((c >> 4) & 0xF);
-                        global::System.Runtime.CompilerServices.Unsafe.Add(ref spanHead, 5) = HexByte(c & 0xF);
+                        GetByte(0) = (byte)'\\';
+                        GetByte(1) = (byte)'u';
+                        GetByte(2) = (byte)'0';
+                        GetByte(3) = (byte)'0';
+                        GetByte(4) = HexByte((c >> 4) & 0xF);
+                        GetByte(5) = HexByte(c & 0xF);
                         Advance(6);
                     }
                     else
@@ -756,7 +940,7 @@ ref struct Utf8JsonBufferWriter
 
         if (chars.Length > safeStart) AppendAsciiRange(chars.Slice(safeStart));
 
-        WriteByte((byte)'"');
+        AppendByte((byte)'"');
         needsSeparator = true;
     }
 
@@ -766,7 +950,12 @@ ref struct Utf8JsonBufferWriter
     void AppendAsciiRange(scoped global::System.ReadOnlySpan<char> chars)
     {
         Ensure(chars.Length);
-        var destSpan = global::System.Runtime.InteropServices.MemoryMarshal.CreateSpan(ref spanHead, chars.Length);
+#if NET7_0_OR_GREATER
+        var destSpan = global::System.Runtime.InteropServices.MemoryMarshal.CreateSpan(ref bufferReference, chars.Length);
+#else
+        // Slice already-pinned span — bufferReference's start is already the write head.
+        var destSpan = bufferReference.Slice(0, chars.Length);
+#endif
         int written = global::System.Text.Encoding.UTF8.GetBytes(chars, destSpan);
         Advance(written);
     }
@@ -775,8 +964,8 @@ ref struct Utf8JsonBufferWriter
     void Append2(byte b0, byte b1)
     {
         Ensure(2);
-        global::System.Runtime.CompilerServices.Unsafe.Add(ref spanHead, 0) = b0;
-        global::System.Runtime.CompilerServices.Unsafe.Add(ref spanHead, 1) = b1;
+        GetByte(0) = b0;
+        GetByte(1) = b1;
         Advance(2);
     }
 
@@ -785,25 +974,25 @@ ref struct Utf8JsonBufferWriter
         if (cp < 0x800)
         {
             Ensure(2);
-            global::System.Runtime.CompilerServices.Unsafe.Add(ref spanHead, 0) = (byte)(0xC0 | (cp >> 6));
-            global::System.Runtime.CompilerServices.Unsafe.Add(ref spanHead, 1) = (byte)(0x80 | (cp & 0x3F));
+            GetByte(0) = (byte)(0xC0 | (cp >> 6));
+            GetByte(1) = (byte)(0x80 | (cp & 0x3F));
             Advance(2);
         }
         else if (cp < 0x10000)
         {
             Ensure(3);
-            global::System.Runtime.CompilerServices.Unsafe.Add(ref spanHead, 0) = (byte)(0xE0 | (cp >> 12));
-            global::System.Runtime.CompilerServices.Unsafe.Add(ref spanHead, 1) = (byte)(0x80 | ((cp >> 6) & 0x3F));
-            global::System.Runtime.CompilerServices.Unsafe.Add(ref spanHead, 2) = (byte)(0x80 | (cp & 0x3F));
+            GetByte(0) = (byte)(0xE0 | (cp >> 12));
+            GetByte(1) = (byte)(0x80 | ((cp >> 6) & 0x3F));
+            GetByte(2) = (byte)(0x80 | (cp & 0x3F));
             Advance(3);
         }
         else
         {
             Ensure(4);
-            global::System.Runtime.CompilerServices.Unsafe.Add(ref spanHead, 0) = (byte)(0xF0 | (cp >> 18));
-            global::System.Runtime.CompilerServices.Unsafe.Add(ref spanHead, 1) = (byte)(0x80 | ((cp >> 12) & 0x3F));
-            global::System.Runtime.CompilerServices.Unsafe.Add(ref spanHead, 2) = (byte)(0x80 | ((cp >> 6) & 0x3F));
-            global::System.Runtime.CompilerServices.Unsafe.Add(ref spanHead, 3) = (byte)(0x80 | (cp & 0x3F));
+            GetByte(0) = (byte)(0xF0 | (cp >> 18));
+            GetByte(1) = (byte)(0x80 | ((cp >> 12) & 0x3F));
+            GetByte(2) = (byte)(0x80 | ((cp >> 6) & 0x3F));
+            GetByte(3) = (byte)(0x80 | (cp & 0x3F));
             Advance(4);
         }
     }
@@ -811,7 +1000,7 @@ ref struct Utf8JsonBufferWriter
     [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
     void MaybeSeparator()
     {
-        if (needsSeparator) WriteByte((byte)',');
+        if (needsSeparator) AppendByte((byte)',');
     }
 
     [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
@@ -819,24 +1008,29 @@ ref struct Utf8JsonBufferWriter
     {
         Ensure(data.Length);
         global::System.Runtime.CompilerServices.Unsafe.CopyBlockUnaligned(
-            ref spanHead,
+            ref GetByte(0),
             ref global::System.Runtime.InteropServices.MemoryMarshal.GetReference(data),
             (uint)data.Length);
         Advance(data.Length);
     }
 
     [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
-    void WriteByte(byte b)
+    void AppendByte(byte b)
     {
         Ensure(1);
-        spanHead = b;
+        GetByte(0) = b;
         Advance(1);
     }
 
     [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
     void Advance(int n)
     {
-        spanHead = ref global::System.Runtime.CompilerServices.Unsafe.Add(ref spanHead, n);
+#if NET7_0_OR_GREATER
+        bufferReference = ref global::System.Runtime.CompilerServices.Unsafe.Add(ref bufferReference, n);
+#else
+        // Span tracks the head itself via slicing — no separate offset to bump.
+        bufferReference = bufferReference.Slice(n);
+#endif
         spanRemaining -= n;
         pending += n;
     }
@@ -846,286 +1040,1526 @@ ref struct Utf8JsonBufferWriter
         if (spanRemaining >= needed) return;
         Flush();
         var newSpan = writer.GetSpan(needed > 256 ? needed : 256);
-        spanHead = ref global::System.Runtime.InteropServices.MemoryMarshal.GetReference(newSpan);
+#if NET7_0_OR_GREATER
+        bufferReference = ref global::System.Runtime.InteropServices.MemoryMarshal.GetReference(newSpan);
+#else
+        bufferReference = newSpan;
+#endif
         spanRemaining = newSpan.Length;
     }
 }
 
 public static class DapSerializer
 {
-    static readonly global::System.Collections.Generic.Dictionary<global::System.Type, object> Formatters = new(247)
-    {
-        [typeof(ProtocolMessage)] = ProtocolMessageFormatterAdapter.Instance,
-        [typeof(Request)] = RequestFormatterAdapter.Instance,
-        [typeof(Event)] = EventFormatterAdapter.Instance,
-        [typeof(Response)] = ResponseFormatterAdapter.Instance,
-        [typeof(ErrorResponseBody)] = ErrorResponseBodyFormatterAdapter.Instance,
-        [typeof(ErrorResponse)] = ErrorResponseFormatterAdapter.Instance,
-        [typeof(CancelRequest)] = CancelRequestFormatterAdapter.Instance,
-        [typeof(CancelArguments)] = CancelArgumentsFormatterAdapter.Instance,
-        [typeof(CancelResponse)] = CancelResponseFormatterAdapter.Instance,
-        [typeof(InitializedEvent)] = InitializedEventFormatterAdapter.Instance,
-        [typeof(StoppedEventBody)] = StoppedEventBodyFormatterAdapter.Instance,
-        [typeof(StoppedEvent)] = StoppedEventFormatterAdapter.Instance,
-        [typeof(ContinuedEventBody)] = ContinuedEventBodyFormatterAdapter.Instance,
-        [typeof(ContinuedEvent)] = ContinuedEventFormatterAdapter.Instance,
-        [typeof(ExitedEventBody)] = ExitedEventBodyFormatterAdapter.Instance,
-        [typeof(ExitedEvent)] = ExitedEventFormatterAdapter.Instance,
-        [typeof(TerminatedEventBody)] = TerminatedEventBodyFormatterAdapter.Instance,
-        [typeof(TerminatedEvent)] = TerminatedEventFormatterAdapter.Instance,
-        [typeof(ThreadEventBody)] = ThreadEventBodyFormatterAdapter.Instance,
-        [typeof(ThreadEvent)] = ThreadEventFormatterAdapter.Instance,
-        [typeof(OutputEventBody)] = OutputEventBodyFormatterAdapter.Instance,
-        [typeof(OutputEventBodyGroup)] = OutputEventBodyGroupFormatterAdapter.Instance,
-        [typeof(OutputEvent)] = OutputEventFormatterAdapter.Instance,
-        [typeof(BreakpointEventBody)] = BreakpointEventBodyFormatterAdapter.Instance,
-        [typeof(BreakpointEvent)] = BreakpointEventFormatterAdapter.Instance,
-        [typeof(ModuleEventBody)] = ModuleEventBodyFormatterAdapter.Instance,
-        [typeof(ModuleEventBodyReason)] = ModuleEventBodyReasonFormatterAdapter.Instance,
-        [typeof(ModuleEvent)] = ModuleEventFormatterAdapter.Instance,
-        [typeof(LoadedSourceEventBody)] = LoadedSourceEventBodyFormatterAdapter.Instance,
-        [typeof(LoadedSourceEventBodyReason)] = LoadedSourceEventBodyReasonFormatterAdapter.Instance,
-        [typeof(LoadedSourceEvent)] = LoadedSourceEventFormatterAdapter.Instance,
-        [typeof(ProcessEventBody)] = ProcessEventBodyFormatterAdapter.Instance,
-        [typeof(ProcessEventBodyStartMethod)] = ProcessEventBodyStartMethodFormatterAdapter.Instance,
-        [typeof(ProcessEvent)] = ProcessEventFormatterAdapter.Instance,
-        [typeof(CapabilitiesEventBody)] = CapabilitiesEventBodyFormatterAdapter.Instance,
-        [typeof(CapabilitiesEvent)] = CapabilitiesEventFormatterAdapter.Instance,
-        [typeof(ProgressStartEventBody)] = ProgressStartEventBodyFormatterAdapter.Instance,
-        [typeof(ProgressStartEvent)] = ProgressStartEventFormatterAdapter.Instance,
-        [typeof(ProgressUpdateEventBody)] = ProgressUpdateEventBodyFormatterAdapter.Instance,
-        [typeof(ProgressUpdateEvent)] = ProgressUpdateEventFormatterAdapter.Instance,
-        [typeof(ProgressEndEventBody)] = ProgressEndEventBodyFormatterAdapter.Instance,
-        [typeof(ProgressEndEvent)] = ProgressEndEventFormatterAdapter.Instance,
-        [typeof(InvalidatedEventBody)] = InvalidatedEventBodyFormatterAdapter.Instance,
-        [typeof(InvalidatedEvent)] = InvalidatedEventFormatterAdapter.Instance,
-        [typeof(MemoryEventBody)] = MemoryEventBodyFormatterAdapter.Instance,
-        [typeof(MemoryEvent)] = MemoryEventFormatterAdapter.Instance,
-        [typeof(RunInTerminalRequest)] = RunInTerminalRequestFormatterAdapter.Instance,
-        [typeof(RunInTerminalRequestArgumentsKind)] = RunInTerminalRequestArgumentsKindFormatterAdapter.Instance,
-        [typeof(RunInTerminalRequestArguments)] = RunInTerminalRequestArgumentsFormatterAdapter.Instance,
-        [typeof(RunInTerminalResponseBody)] = RunInTerminalResponseBodyFormatterAdapter.Instance,
-        [typeof(RunInTerminalResponse)] = RunInTerminalResponseFormatterAdapter.Instance,
-        [typeof(StartDebuggingRequest)] = StartDebuggingRequestFormatterAdapter.Instance,
-        [typeof(StartDebuggingRequestArgumentsOutputPresentation)] = StartDebuggingRequestArgumentsOutputPresentationFormatterAdapter.Instance,
-        [typeof(StartDebuggingRequestArgumentsRequest)] = StartDebuggingRequestArgumentsRequestFormatterAdapter.Instance,
-        [typeof(StartDebuggingRequestArguments)] = StartDebuggingRequestArgumentsFormatterAdapter.Instance,
-        [typeof(StartDebuggingResponse)] = StartDebuggingResponseFormatterAdapter.Instance,
-        [typeof(InitializeRequest)] = InitializeRequestFormatterAdapter.Instance,
-        [typeof(InitializeRequestArguments)] = InitializeRequestArgumentsFormatterAdapter.Instance,
-        [typeof(InitializeResponse)] = InitializeResponseFormatterAdapter.Instance,
-        [typeof(ConfigurationDoneRequest)] = ConfigurationDoneRequestFormatterAdapter.Instance,
-        [typeof(ConfigurationDoneArguments)] = ConfigurationDoneArgumentsFormatterAdapter.Instance,
-        [typeof(ConfigurationDoneResponse)] = ConfigurationDoneResponseFormatterAdapter.Instance,
-        [typeof(LaunchRequest)] = LaunchRequestFormatterAdapter.Instance,
-        [typeof(LaunchRequestArguments)] = LaunchRequestArgumentsFormatterAdapter.Instance,
-        [typeof(LaunchResponse)] = LaunchResponseFormatterAdapter.Instance,
-        [typeof(AttachRequest)] = AttachRequestFormatterAdapter.Instance,
-        [typeof(AttachRequestArguments)] = AttachRequestArgumentsFormatterAdapter.Instance,
-        [typeof(AttachResponse)] = AttachResponseFormatterAdapter.Instance,
-        [typeof(RestartRequest)] = RestartRequestFormatterAdapter.Instance,
-        [typeof(RestartArguments)] = RestartArgumentsFormatterAdapter.Instance,
-        [typeof(RestartResponse)] = RestartResponseFormatterAdapter.Instance,
-        [typeof(DisconnectRequest)] = DisconnectRequestFormatterAdapter.Instance,
-        [typeof(DisconnectArguments)] = DisconnectArgumentsFormatterAdapter.Instance,
-        [typeof(DisconnectResponse)] = DisconnectResponseFormatterAdapter.Instance,
-        [typeof(TerminateRequest)] = TerminateRequestFormatterAdapter.Instance,
-        [typeof(TerminateArguments)] = TerminateArgumentsFormatterAdapter.Instance,
-        [typeof(TerminateResponse)] = TerminateResponseFormatterAdapter.Instance,
-        [typeof(BreakpointLocationsRequest)] = BreakpointLocationsRequestFormatterAdapter.Instance,
-        [typeof(BreakpointLocationsArguments)] = BreakpointLocationsArgumentsFormatterAdapter.Instance,
-        [typeof(BreakpointLocationsResponseBody)] = BreakpointLocationsResponseBodyFormatterAdapter.Instance,
-        [typeof(BreakpointLocationsResponse)] = BreakpointLocationsResponseFormatterAdapter.Instance,
-        [typeof(SetBreakpointsRequest)] = SetBreakpointsRequestFormatterAdapter.Instance,
-        [typeof(SetBreakpointsArguments)] = SetBreakpointsArgumentsFormatterAdapter.Instance,
-        [typeof(SetBreakpointsResponseBody)] = SetBreakpointsResponseBodyFormatterAdapter.Instance,
-        [typeof(SetBreakpointsResponse)] = SetBreakpointsResponseFormatterAdapter.Instance,
-        [typeof(SetFunctionBreakpointsRequest)] = SetFunctionBreakpointsRequestFormatterAdapter.Instance,
-        [typeof(SetFunctionBreakpointsArguments)] = SetFunctionBreakpointsArgumentsFormatterAdapter.Instance,
-        [typeof(SetFunctionBreakpointsResponseBody)] = SetFunctionBreakpointsResponseBodyFormatterAdapter.Instance,
-        [typeof(SetFunctionBreakpointsResponse)] = SetFunctionBreakpointsResponseFormatterAdapter.Instance,
-        [typeof(SetExceptionBreakpointsRequest)] = SetExceptionBreakpointsRequestFormatterAdapter.Instance,
-        [typeof(SetExceptionBreakpointsArguments)] = SetExceptionBreakpointsArgumentsFormatterAdapter.Instance,
-        [typeof(SetExceptionBreakpointsResponseBody)] = SetExceptionBreakpointsResponseBodyFormatterAdapter.Instance,
-        [typeof(SetExceptionBreakpointsResponse)] = SetExceptionBreakpointsResponseFormatterAdapter.Instance,
-        [typeof(DataBreakpointInfoRequest)] = DataBreakpointInfoRequestFormatterAdapter.Instance,
-        [typeof(DataBreakpointInfoArguments)] = DataBreakpointInfoArgumentsFormatterAdapter.Instance,
-        [typeof(DataBreakpointInfoResponseBody)] = DataBreakpointInfoResponseBodyFormatterAdapter.Instance,
-        [typeof(DataBreakpointInfoResponse)] = DataBreakpointInfoResponseFormatterAdapter.Instance,
-        [typeof(SetDataBreakpointsRequest)] = SetDataBreakpointsRequestFormatterAdapter.Instance,
-        [typeof(SetDataBreakpointsArguments)] = SetDataBreakpointsArgumentsFormatterAdapter.Instance,
-        [typeof(SetDataBreakpointsResponseBody)] = SetDataBreakpointsResponseBodyFormatterAdapter.Instance,
-        [typeof(SetDataBreakpointsResponse)] = SetDataBreakpointsResponseFormatterAdapter.Instance,
-        [typeof(SetInstructionBreakpointsRequest)] = SetInstructionBreakpointsRequestFormatterAdapter.Instance,
-        [typeof(SetInstructionBreakpointsArguments)] = SetInstructionBreakpointsArgumentsFormatterAdapter.Instance,
-        [typeof(SetInstructionBreakpointsResponseBody)] = SetInstructionBreakpointsResponseBodyFormatterAdapter.Instance,
-        [typeof(SetInstructionBreakpointsResponse)] = SetInstructionBreakpointsResponseFormatterAdapter.Instance,
-        [typeof(ContinueRequest)] = ContinueRequestFormatterAdapter.Instance,
-        [typeof(ContinueArguments)] = ContinueArgumentsFormatterAdapter.Instance,
-        [typeof(ContinueResponseBody)] = ContinueResponseBodyFormatterAdapter.Instance,
-        [typeof(ContinueResponse)] = ContinueResponseFormatterAdapter.Instance,
-        [typeof(NextRequest)] = NextRequestFormatterAdapter.Instance,
-        [typeof(NextArguments)] = NextArgumentsFormatterAdapter.Instance,
-        [typeof(NextResponse)] = NextResponseFormatterAdapter.Instance,
-        [typeof(StepInRequest)] = StepInRequestFormatterAdapter.Instance,
-        [typeof(StepInArguments)] = StepInArgumentsFormatterAdapter.Instance,
-        [typeof(StepInResponse)] = StepInResponseFormatterAdapter.Instance,
-        [typeof(StepOutRequest)] = StepOutRequestFormatterAdapter.Instance,
-        [typeof(StepOutArguments)] = StepOutArgumentsFormatterAdapter.Instance,
-        [typeof(StepOutResponse)] = StepOutResponseFormatterAdapter.Instance,
-        [typeof(StepBackRequest)] = StepBackRequestFormatterAdapter.Instance,
-        [typeof(StepBackArguments)] = StepBackArgumentsFormatterAdapter.Instance,
-        [typeof(StepBackResponse)] = StepBackResponseFormatterAdapter.Instance,
-        [typeof(ReverseContinueRequest)] = ReverseContinueRequestFormatterAdapter.Instance,
-        [typeof(ReverseContinueArguments)] = ReverseContinueArgumentsFormatterAdapter.Instance,
-        [typeof(ReverseContinueResponse)] = ReverseContinueResponseFormatterAdapter.Instance,
-        [typeof(RestartFrameRequest)] = RestartFrameRequestFormatterAdapter.Instance,
-        [typeof(RestartFrameArguments)] = RestartFrameArgumentsFormatterAdapter.Instance,
-        [typeof(RestartFrameResponse)] = RestartFrameResponseFormatterAdapter.Instance,
-        [typeof(GotoRequest)] = GotoRequestFormatterAdapter.Instance,
-        [typeof(GotoArguments)] = GotoArgumentsFormatterAdapter.Instance,
-        [typeof(GotoResponse)] = GotoResponseFormatterAdapter.Instance,
-        [typeof(PauseRequest)] = PauseRequestFormatterAdapter.Instance,
-        [typeof(PauseArguments)] = PauseArgumentsFormatterAdapter.Instance,
-        [typeof(PauseResponse)] = PauseResponseFormatterAdapter.Instance,
-        [typeof(StackTraceRequest)] = StackTraceRequestFormatterAdapter.Instance,
-        [typeof(StackTraceArguments)] = StackTraceArgumentsFormatterAdapter.Instance,
-        [typeof(StackTraceResponseBody)] = StackTraceResponseBodyFormatterAdapter.Instance,
-        [typeof(StackTraceResponse)] = StackTraceResponseFormatterAdapter.Instance,
-        [typeof(ScopesRequest)] = ScopesRequestFormatterAdapter.Instance,
-        [typeof(ScopesArguments)] = ScopesArgumentsFormatterAdapter.Instance,
-        [typeof(ScopesResponseBody)] = ScopesResponseBodyFormatterAdapter.Instance,
-        [typeof(ScopesResponse)] = ScopesResponseFormatterAdapter.Instance,
-        [typeof(VariablesRequest)] = VariablesRequestFormatterAdapter.Instance,
-        [typeof(VariablesArgumentsFilter)] = VariablesArgumentsFilterFormatterAdapter.Instance,
-        [typeof(VariablesArguments)] = VariablesArgumentsFormatterAdapter.Instance,
-        [typeof(VariablesResponseBody)] = VariablesResponseBodyFormatterAdapter.Instance,
-        [typeof(VariablesResponse)] = VariablesResponseFormatterAdapter.Instance,
-        [typeof(SetVariableRequest)] = SetVariableRequestFormatterAdapter.Instance,
-        [typeof(SetVariableArguments)] = SetVariableArgumentsFormatterAdapter.Instance,
-        [typeof(SetVariableResponseBody)] = SetVariableResponseBodyFormatterAdapter.Instance,
-        [typeof(SetVariableResponse)] = SetVariableResponseFormatterAdapter.Instance,
-        [typeof(SourceRequest)] = SourceRequestFormatterAdapter.Instance,
-        [typeof(SourceArguments)] = SourceArgumentsFormatterAdapter.Instance,
-        [typeof(SourceResponseBody)] = SourceResponseBodyFormatterAdapter.Instance,
-        [typeof(SourceResponse)] = SourceResponseFormatterAdapter.Instance,
-        [typeof(ThreadsRequest)] = ThreadsRequestFormatterAdapter.Instance,
-        [typeof(ThreadsResponseBody)] = ThreadsResponseBodyFormatterAdapter.Instance,
-        [typeof(ThreadsResponse)] = ThreadsResponseFormatterAdapter.Instance,
-        [typeof(TerminateThreadsRequest)] = TerminateThreadsRequestFormatterAdapter.Instance,
-        [typeof(TerminateThreadsArguments)] = TerminateThreadsArgumentsFormatterAdapter.Instance,
-        [typeof(TerminateThreadsResponse)] = TerminateThreadsResponseFormatterAdapter.Instance,
-        [typeof(ModulesRequest)] = ModulesRequestFormatterAdapter.Instance,
-        [typeof(ModulesArguments)] = ModulesArgumentsFormatterAdapter.Instance,
-        [typeof(ModulesResponseBody)] = ModulesResponseBodyFormatterAdapter.Instance,
-        [typeof(ModulesResponse)] = ModulesResponseFormatterAdapter.Instance,
-        [typeof(LoadedSourcesRequest)] = LoadedSourcesRequestFormatterAdapter.Instance,
-        [typeof(LoadedSourcesArguments)] = LoadedSourcesArgumentsFormatterAdapter.Instance,
-        [typeof(LoadedSourcesResponseBody)] = LoadedSourcesResponseBodyFormatterAdapter.Instance,
-        [typeof(LoadedSourcesResponse)] = LoadedSourcesResponseFormatterAdapter.Instance,
-        [typeof(EvaluateRequest)] = EvaluateRequestFormatterAdapter.Instance,
-        [typeof(EvaluateArguments)] = EvaluateArgumentsFormatterAdapter.Instance,
-        [typeof(EvaluateResponseBody)] = EvaluateResponseBodyFormatterAdapter.Instance,
-        [typeof(EvaluateResponse)] = EvaluateResponseFormatterAdapter.Instance,
-        [typeof(SetExpressionRequest)] = SetExpressionRequestFormatterAdapter.Instance,
-        [typeof(SetExpressionArguments)] = SetExpressionArgumentsFormatterAdapter.Instance,
-        [typeof(SetExpressionResponseBody)] = SetExpressionResponseBodyFormatterAdapter.Instance,
-        [typeof(SetExpressionResponse)] = SetExpressionResponseFormatterAdapter.Instance,
-        [typeof(StepInTargetsRequest)] = StepInTargetsRequestFormatterAdapter.Instance,
-        [typeof(StepInTargetsArguments)] = StepInTargetsArgumentsFormatterAdapter.Instance,
-        [typeof(StepInTargetsResponseBody)] = StepInTargetsResponseBodyFormatterAdapter.Instance,
-        [typeof(StepInTargetsResponse)] = StepInTargetsResponseFormatterAdapter.Instance,
-        [typeof(GotoTargetsRequest)] = GotoTargetsRequestFormatterAdapter.Instance,
-        [typeof(GotoTargetsArguments)] = GotoTargetsArgumentsFormatterAdapter.Instance,
-        [typeof(GotoTargetsResponseBody)] = GotoTargetsResponseBodyFormatterAdapter.Instance,
-        [typeof(GotoTargetsResponse)] = GotoTargetsResponseFormatterAdapter.Instance,
-        [typeof(CompletionsRequest)] = CompletionsRequestFormatterAdapter.Instance,
-        [typeof(CompletionsArguments)] = CompletionsArgumentsFormatterAdapter.Instance,
-        [typeof(CompletionsResponseBody)] = CompletionsResponseBodyFormatterAdapter.Instance,
-        [typeof(CompletionsResponse)] = CompletionsResponseFormatterAdapter.Instance,
-        [typeof(ExceptionInfoRequest)] = ExceptionInfoRequestFormatterAdapter.Instance,
-        [typeof(ExceptionInfoArguments)] = ExceptionInfoArgumentsFormatterAdapter.Instance,
-        [typeof(ExceptionInfoResponseBody)] = ExceptionInfoResponseBodyFormatterAdapter.Instance,
-        [typeof(ExceptionInfoResponse)] = ExceptionInfoResponseFormatterAdapter.Instance,
-        [typeof(ReadMemoryRequest)] = ReadMemoryRequestFormatterAdapter.Instance,
-        [typeof(ReadMemoryArguments)] = ReadMemoryArgumentsFormatterAdapter.Instance,
-        [typeof(ReadMemoryResponseBody)] = ReadMemoryResponseBodyFormatterAdapter.Instance,
-        [typeof(ReadMemoryResponse)] = ReadMemoryResponseFormatterAdapter.Instance,
-        [typeof(WriteMemoryRequest)] = WriteMemoryRequestFormatterAdapter.Instance,
-        [typeof(WriteMemoryArguments)] = WriteMemoryArgumentsFormatterAdapter.Instance,
-        [typeof(WriteMemoryResponseBody)] = WriteMemoryResponseBodyFormatterAdapter.Instance,
-        [typeof(WriteMemoryResponse)] = WriteMemoryResponseFormatterAdapter.Instance,
-        [typeof(DisassembleRequest)] = DisassembleRequestFormatterAdapter.Instance,
-        [typeof(DisassembleArguments)] = DisassembleArgumentsFormatterAdapter.Instance,
-        [typeof(DisassembleResponseBody)] = DisassembleResponseBodyFormatterAdapter.Instance,
-        [typeof(DisassembleResponse)] = DisassembleResponseFormatterAdapter.Instance,
-        [typeof(LocationsRequest)] = LocationsRequestFormatterAdapter.Instance,
-        [typeof(LocationsArguments)] = LocationsArgumentsFormatterAdapter.Instance,
-        [typeof(LocationsResponseBody)] = LocationsResponseBodyFormatterAdapter.Instance,
-        [typeof(LocationsResponse)] = LocationsResponseFormatterAdapter.Instance,
-        [typeof(Capabilities)] = CapabilitiesFormatterAdapter.Instance,
-        [typeof(ExceptionBreakpointsFilter)] = ExceptionBreakpointsFilterFormatterAdapter.Instance,
-        [typeof(Message)] = MessageFormatterAdapter.Instance,
-        [typeof(Module)] = ModuleFormatterAdapter.Instance,
-        [typeof(ColumnDescriptorType)] = ColumnDescriptorTypeFormatterAdapter.Instance,
-        [typeof(ColumnDescriptor)] = ColumnDescriptorFormatterAdapter.Instance,
-        [typeof(Thread)] = ThreadFormatterAdapter.Instance,
-        [typeof(SourcePresentationHint)] = SourcePresentationHintFormatterAdapter.Instance,
-        [typeof(Source)] = SourceFormatterAdapter.Instance,
-        [typeof(StackFramePresentationHint)] = StackFramePresentationHintFormatterAdapter.Instance,
-        [typeof(StackFrame)] = StackFrameFormatterAdapter.Instance,
-        [typeof(Scope)] = ScopeFormatterAdapter.Instance,
-        [typeof(Variable)] = VariableFormatterAdapter.Instance,
-        [typeof(VariablePresentationHint)] = VariablePresentationHintFormatterAdapter.Instance,
-        [typeof(BreakpointLocation)] = BreakpointLocationFormatterAdapter.Instance,
-        [typeof(SourceBreakpoint)] = SourceBreakpointFormatterAdapter.Instance,
-        [typeof(FunctionBreakpoint)] = FunctionBreakpointFormatterAdapter.Instance,
-        [typeof(DataBreakpointAccessType)] = DataBreakpointAccessTypeFormatterAdapter.Instance,
-        [typeof(DataBreakpoint)] = DataBreakpointFormatterAdapter.Instance,
-        [typeof(InstructionBreakpoint)] = InstructionBreakpointFormatterAdapter.Instance,
-        [typeof(BreakpointReason)] = BreakpointReasonFormatterAdapter.Instance,
-        [typeof(Breakpoint)] = BreakpointFormatterAdapter.Instance,
-        [typeof(SteppingGranularity)] = SteppingGranularityFormatterAdapter.Instance,
-        [typeof(StepInTarget)] = StepInTargetFormatterAdapter.Instance,
-        [typeof(GotoTarget)] = GotoTargetFormatterAdapter.Instance,
-        [typeof(CompletionItem)] = CompletionItemFormatterAdapter.Instance,
-        [typeof(CompletionItemType)] = CompletionItemTypeFormatterAdapter.Instance,
-        [typeof(ChecksumAlgorithm)] = ChecksumAlgorithmFormatterAdapter.Instance,
-        [typeof(Checksum)] = ChecksumFormatterAdapter.Instance,
-        [typeof(ValueFormat)] = ValueFormatFormatterAdapter.Instance,
-        [typeof(StackFrameFormat)] = StackFrameFormatFormatterAdapter.Instance,
-        [typeof(ExceptionFilterOptions)] = ExceptionFilterOptionsFormatterAdapter.Instance,
-        [typeof(ExceptionOptions)] = ExceptionOptionsFormatterAdapter.Instance,
-        [typeof(ExceptionBreakMode)] = ExceptionBreakModeFormatterAdapter.Instance,
-        [typeof(ExceptionPathSegment)] = ExceptionPathSegmentFormatterAdapter.Instance,
-        [typeof(ExceptionDetails)] = ExceptionDetailsFormatterAdapter.Instance,
-        [typeof(DisassembledInstructionPresentationHint)] = DisassembledInstructionPresentationHintFormatterAdapter.Instance,
-        [typeof(DisassembledInstruction)] = DisassembledInstructionFormatterAdapter.Instance,
-        [typeof(BreakpointMode)] = BreakpointModeFormatterAdapter.Instance,
-    };
+    delegate T DeserializeDelegate<T>(global::System.ReadOnlySpan<byte> utf8Json, NoJsonSerializerOptions options);
+    delegate void SerializeDelegate<T>(global::System.Buffers.IBufferWriter<byte> writer, in T value, NoJsonSerializerOptions options);
     
     static class Cache<T>
     {
-        public static readonly INoJsonFormatter<T>? Formatter =
-            Formatters.TryGetValue(typeof(T), out var __v)
-                ? global::System.Runtime.CompilerServices.Unsafe.As<INoJsonFormatter<T>>(__v)
-                : null;
+        public static readonly DeserializeDelegate<T>? Deserialize;
+        public static readonly SerializeDelegate<T>? Serialize;
+        
+        static Cache()
+        {
+            if (typeof(T) == typeof(ProtocolMessage))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<ProtocolMessage>)ProtocolMessageFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<ProtocolMessage>)ProtocolMessageFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(Request))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<Request>)RequestFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<Request>)RequestFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(Event))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<Event>)EventFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<Event>)EventFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(Response))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<Response>)ResponseFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<Response>)ResponseFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(ErrorResponseBody))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<ErrorResponseBody>)ErrorResponseBodyFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<ErrorResponseBody>)ErrorResponseBodyFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(ErrorResponse))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<ErrorResponse>)ErrorResponseFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<ErrorResponse>)ErrorResponseFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(CancelRequest))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<CancelRequest>)CancelRequestFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<CancelRequest>)CancelRequestFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(CancelArguments))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<CancelArguments>)CancelArgumentsFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<CancelArguments>)CancelArgumentsFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(CancelResponse))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<CancelResponse>)CancelResponseFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<CancelResponse>)CancelResponseFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(InitializedEvent))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<InitializedEvent>)InitializedEventFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<InitializedEvent>)InitializedEventFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(StoppedEventBody))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<StoppedEventBody>)StoppedEventBodyFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<StoppedEventBody>)StoppedEventBodyFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(StoppedEvent))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<StoppedEvent>)StoppedEventFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<StoppedEvent>)StoppedEventFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(ContinuedEventBody))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<ContinuedEventBody>)ContinuedEventBodyFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<ContinuedEventBody>)ContinuedEventBodyFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(ContinuedEvent))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<ContinuedEvent>)ContinuedEventFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<ContinuedEvent>)ContinuedEventFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(ExitedEventBody))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<ExitedEventBody>)ExitedEventBodyFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<ExitedEventBody>)ExitedEventBodyFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(ExitedEvent))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<ExitedEvent>)ExitedEventFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<ExitedEvent>)ExitedEventFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(TerminatedEventBody))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<TerminatedEventBody>)TerminatedEventBodyFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<TerminatedEventBody>)TerminatedEventBodyFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(TerminatedEvent))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<TerminatedEvent>)TerminatedEventFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<TerminatedEvent>)TerminatedEventFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(ThreadEventBody))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<ThreadEventBody>)ThreadEventBodyFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<ThreadEventBody>)ThreadEventBodyFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(ThreadEvent))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<ThreadEvent>)ThreadEventFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<ThreadEvent>)ThreadEventFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(OutputEventBody))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<OutputEventBody>)OutputEventBodyFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<OutputEventBody>)OutputEventBodyFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(OutputEventBodyGroup))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<OutputEventBodyGroup>)OutputEventBodyGroupFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<OutputEventBodyGroup>)OutputEventBodyGroupFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(OutputEvent))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<OutputEvent>)OutputEventFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<OutputEvent>)OutputEventFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(BreakpointEventBody))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<BreakpointEventBody>)BreakpointEventBodyFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<BreakpointEventBody>)BreakpointEventBodyFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(BreakpointEvent))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<BreakpointEvent>)BreakpointEventFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<BreakpointEvent>)BreakpointEventFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(ModuleEventBody))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<ModuleEventBody>)ModuleEventBodyFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<ModuleEventBody>)ModuleEventBodyFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(ModuleEventBodyReason))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<ModuleEventBodyReason>)ModuleEventBodyReasonFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<ModuleEventBodyReason>)ModuleEventBodyReasonFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(ModuleEvent))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<ModuleEvent>)ModuleEventFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<ModuleEvent>)ModuleEventFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(LoadedSourceEventBody))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<LoadedSourceEventBody>)LoadedSourceEventBodyFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<LoadedSourceEventBody>)LoadedSourceEventBodyFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(LoadedSourceEventBodyReason))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<LoadedSourceEventBodyReason>)LoadedSourceEventBodyReasonFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<LoadedSourceEventBodyReason>)LoadedSourceEventBodyReasonFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(LoadedSourceEvent))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<LoadedSourceEvent>)LoadedSourceEventFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<LoadedSourceEvent>)LoadedSourceEventFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(ProcessEventBody))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<ProcessEventBody>)ProcessEventBodyFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<ProcessEventBody>)ProcessEventBodyFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(ProcessEventBodyStartMethod))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<ProcessEventBodyStartMethod>)ProcessEventBodyStartMethodFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<ProcessEventBodyStartMethod>)ProcessEventBodyStartMethodFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(ProcessEvent))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<ProcessEvent>)ProcessEventFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<ProcessEvent>)ProcessEventFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(CapabilitiesEventBody))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<CapabilitiesEventBody>)CapabilitiesEventBodyFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<CapabilitiesEventBody>)CapabilitiesEventBodyFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(CapabilitiesEvent))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<CapabilitiesEvent>)CapabilitiesEventFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<CapabilitiesEvent>)CapabilitiesEventFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(ProgressStartEventBody))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<ProgressStartEventBody>)ProgressStartEventBodyFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<ProgressStartEventBody>)ProgressStartEventBodyFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(ProgressStartEvent))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<ProgressStartEvent>)ProgressStartEventFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<ProgressStartEvent>)ProgressStartEventFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(ProgressUpdateEventBody))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<ProgressUpdateEventBody>)ProgressUpdateEventBodyFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<ProgressUpdateEventBody>)ProgressUpdateEventBodyFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(ProgressUpdateEvent))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<ProgressUpdateEvent>)ProgressUpdateEventFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<ProgressUpdateEvent>)ProgressUpdateEventFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(ProgressEndEventBody))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<ProgressEndEventBody>)ProgressEndEventBodyFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<ProgressEndEventBody>)ProgressEndEventBodyFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(ProgressEndEvent))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<ProgressEndEvent>)ProgressEndEventFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<ProgressEndEvent>)ProgressEndEventFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(InvalidatedEventBody))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<InvalidatedEventBody>)InvalidatedEventBodyFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<InvalidatedEventBody>)InvalidatedEventBodyFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(InvalidatedEvent))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<InvalidatedEvent>)InvalidatedEventFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<InvalidatedEvent>)InvalidatedEventFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(MemoryEventBody))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<MemoryEventBody>)MemoryEventBodyFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<MemoryEventBody>)MemoryEventBodyFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(MemoryEvent))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<MemoryEvent>)MemoryEventFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<MemoryEvent>)MemoryEventFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(RunInTerminalRequest))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<RunInTerminalRequest>)RunInTerminalRequestFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<RunInTerminalRequest>)RunInTerminalRequestFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(RunInTerminalRequestArgumentsKind))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<RunInTerminalRequestArgumentsKind>)RunInTerminalRequestArgumentsKindFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<RunInTerminalRequestArgumentsKind>)RunInTerminalRequestArgumentsKindFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(RunInTerminalRequestArguments))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<RunInTerminalRequestArguments>)RunInTerminalRequestArgumentsFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<RunInTerminalRequestArguments>)RunInTerminalRequestArgumentsFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(RunInTerminalResponseBody))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<RunInTerminalResponseBody>)RunInTerminalResponseBodyFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<RunInTerminalResponseBody>)RunInTerminalResponseBodyFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(RunInTerminalResponse))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<RunInTerminalResponse>)RunInTerminalResponseFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<RunInTerminalResponse>)RunInTerminalResponseFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(StartDebuggingRequest))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<StartDebuggingRequest>)StartDebuggingRequestFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<StartDebuggingRequest>)StartDebuggingRequestFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(StartDebuggingRequestArgumentsOutputPresentation))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<StartDebuggingRequestArgumentsOutputPresentation>)StartDebuggingRequestArgumentsOutputPresentationFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<StartDebuggingRequestArgumentsOutputPresentation>)StartDebuggingRequestArgumentsOutputPresentationFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(StartDebuggingRequestArgumentsRequest))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<StartDebuggingRequestArgumentsRequest>)StartDebuggingRequestArgumentsRequestFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<StartDebuggingRequestArgumentsRequest>)StartDebuggingRequestArgumentsRequestFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(StartDebuggingRequestArguments))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<StartDebuggingRequestArguments>)StartDebuggingRequestArgumentsFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<StartDebuggingRequestArguments>)StartDebuggingRequestArgumentsFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(StartDebuggingResponse))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<StartDebuggingResponse>)StartDebuggingResponseFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<StartDebuggingResponse>)StartDebuggingResponseFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(InitializeRequest))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<InitializeRequest>)InitializeRequestFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<InitializeRequest>)InitializeRequestFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(InitializeRequestArguments))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<InitializeRequestArguments>)InitializeRequestArgumentsFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<InitializeRequestArguments>)InitializeRequestArgumentsFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(InitializeResponse))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<InitializeResponse>)InitializeResponseFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<InitializeResponse>)InitializeResponseFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(ConfigurationDoneRequest))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<ConfigurationDoneRequest>)ConfigurationDoneRequestFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<ConfigurationDoneRequest>)ConfigurationDoneRequestFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(ConfigurationDoneArguments))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<ConfigurationDoneArguments>)ConfigurationDoneArgumentsFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<ConfigurationDoneArguments>)ConfigurationDoneArgumentsFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(ConfigurationDoneResponse))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<ConfigurationDoneResponse>)ConfigurationDoneResponseFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<ConfigurationDoneResponse>)ConfigurationDoneResponseFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(LaunchRequest))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<LaunchRequest>)LaunchRequestFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<LaunchRequest>)LaunchRequestFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(LaunchRequestArguments))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<LaunchRequestArguments>)LaunchRequestArgumentsFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<LaunchRequestArguments>)LaunchRequestArgumentsFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(LaunchResponse))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<LaunchResponse>)LaunchResponseFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<LaunchResponse>)LaunchResponseFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(AttachRequest))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<AttachRequest>)AttachRequestFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<AttachRequest>)AttachRequestFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(AttachRequestArguments))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<AttachRequestArguments>)AttachRequestArgumentsFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<AttachRequestArguments>)AttachRequestArgumentsFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(AttachResponse))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<AttachResponse>)AttachResponseFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<AttachResponse>)AttachResponseFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(RestartRequest))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<RestartRequest>)RestartRequestFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<RestartRequest>)RestartRequestFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(RestartArguments))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<RestartArguments>)RestartArgumentsFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<RestartArguments>)RestartArgumentsFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(RestartResponse))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<RestartResponse>)RestartResponseFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<RestartResponse>)RestartResponseFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(DisconnectRequest))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<DisconnectRequest>)DisconnectRequestFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<DisconnectRequest>)DisconnectRequestFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(DisconnectArguments))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<DisconnectArguments>)DisconnectArgumentsFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<DisconnectArguments>)DisconnectArgumentsFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(DisconnectResponse))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<DisconnectResponse>)DisconnectResponseFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<DisconnectResponse>)DisconnectResponseFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(TerminateRequest))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<TerminateRequest>)TerminateRequestFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<TerminateRequest>)TerminateRequestFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(TerminateArguments))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<TerminateArguments>)TerminateArgumentsFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<TerminateArguments>)TerminateArgumentsFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(TerminateResponse))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<TerminateResponse>)TerminateResponseFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<TerminateResponse>)TerminateResponseFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(BreakpointLocationsRequest))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<BreakpointLocationsRequest>)BreakpointLocationsRequestFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<BreakpointLocationsRequest>)BreakpointLocationsRequestFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(BreakpointLocationsArguments))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<BreakpointLocationsArguments>)BreakpointLocationsArgumentsFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<BreakpointLocationsArguments>)BreakpointLocationsArgumentsFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(BreakpointLocationsResponseBody))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<BreakpointLocationsResponseBody>)BreakpointLocationsResponseBodyFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<BreakpointLocationsResponseBody>)BreakpointLocationsResponseBodyFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(BreakpointLocationsResponse))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<BreakpointLocationsResponse>)BreakpointLocationsResponseFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<BreakpointLocationsResponse>)BreakpointLocationsResponseFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(SetBreakpointsRequest))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<SetBreakpointsRequest>)SetBreakpointsRequestFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<SetBreakpointsRequest>)SetBreakpointsRequestFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(SetBreakpointsArguments))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<SetBreakpointsArguments>)SetBreakpointsArgumentsFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<SetBreakpointsArguments>)SetBreakpointsArgumentsFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(SetBreakpointsResponseBody))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<SetBreakpointsResponseBody>)SetBreakpointsResponseBodyFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<SetBreakpointsResponseBody>)SetBreakpointsResponseBodyFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(SetBreakpointsResponse))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<SetBreakpointsResponse>)SetBreakpointsResponseFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<SetBreakpointsResponse>)SetBreakpointsResponseFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(SetFunctionBreakpointsRequest))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<SetFunctionBreakpointsRequest>)SetFunctionBreakpointsRequestFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<SetFunctionBreakpointsRequest>)SetFunctionBreakpointsRequestFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(SetFunctionBreakpointsArguments))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<SetFunctionBreakpointsArguments>)SetFunctionBreakpointsArgumentsFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<SetFunctionBreakpointsArguments>)SetFunctionBreakpointsArgumentsFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(SetFunctionBreakpointsResponseBody))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<SetFunctionBreakpointsResponseBody>)SetFunctionBreakpointsResponseBodyFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<SetFunctionBreakpointsResponseBody>)SetFunctionBreakpointsResponseBodyFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(SetFunctionBreakpointsResponse))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<SetFunctionBreakpointsResponse>)SetFunctionBreakpointsResponseFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<SetFunctionBreakpointsResponse>)SetFunctionBreakpointsResponseFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(SetExceptionBreakpointsRequest))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<SetExceptionBreakpointsRequest>)SetExceptionBreakpointsRequestFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<SetExceptionBreakpointsRequest>)SetExceptionBreakpointsRequestFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(SetExceptionBreakpointsArguments))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<SetExceptionBreakpointsArguments>)SetExceptionBreakpointsArgumentsFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<SetExceptionBreakpointsArguments>)SetExceptionBreakpointsArgumentsFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(SetExceptionBreakpointsResponseBody))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<SetExceptionBreakpointsResponseBody>)SetExceptionBreakpointsResponseBodyFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<SetExceptionBreakpointsResponseBody>)SetExceptionBreakpointsResponseBodyFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(SetExceptionBreakpointsResponse))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<SetExceptionBreakpointsResponse>)SetExceptionBreakpointsResponseFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<SetExceptionBreakpointsResponse>)SetExceptionBreakpointsResponseFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(DataBreakpointInfoRequest))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<DataBreakpointInfoRequest>)DataBreakpointInfoRequestFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<DataBreakpointInfoRequest>)DataBreakpointInfoRequestFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(DataBreakpointInfoArguments))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<DataBreakpointInfoArguments>)DataBreakpointInfoArgumentsFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<DataBreakpointInfoArguments>)DataBreakpointInfoArgumentsFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(DataBreakpointInfoResponseBody))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<DataBreakpointInfoResponseBody>)DataBreakpointInfoResponseBodyFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<DataBreakpointInfoResponseBody>)DataBreakpointInfoResponseBodyFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(DataBreakpointInfoResponse))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<DataBreakpointInfoResponse>)DataBreakpointInfoResponseFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<DataBreakpointInfoResponse>)DataBreakpointInfoResponseFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(SetDataBreakpointsRequest))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<SetDataBreakpointsRequest>)SetDataBreakpointsRequestFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<SetDataBreakpointsRequest>)SetDataBreakpointsRequestFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(SetDataBreakpointsArguments))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<SetDataBreakpointsArguments>)SetDataBreakpointsArgumentsFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<SetDataBreakpointsArguments>)SetDataBreakpointsArgumentsFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(SetDataBreakpointsResponseBody))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<SetDataBreakpointsResponseBody>)SetDataBreakpointsResponseBodyFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<SetDataBreakpointsResponseBody>)SetDataBreakpointsResponseBodyFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(SetDataBreakpointsResponse))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<SetDataBreakpointsResponse>)SetDataBreakpointsResponseFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<SetDataBreakpointsResponse>)SetDataBreakpointsResponseFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(SetInstructionBreakpointsRequest))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<SetInstructionBreakpointsRequest>)SetInstructionBreakpointsRequestFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<SetInstructionBreakpointsRequest>)SetInstructionBreakpointsRequestFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(SetInstructionBreakpointsArguments))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<SetInstructionBreakpointsArguments>)SetInstructionBreakpointsArgumentsFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<SetInstructionBreakpointsArguments>)SetInstructionBreakpointsArgumentsFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(SetInstructionBreakpointsResponseBody))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<SetInstructionBreakpointsResponseBody>)SetInstructionBreakpointsResponseBodyFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<SetInstructionBreakpointsResponseBody>)SetInstructionBreakpointsResponseBodyFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(SetInstructionBreakpointsResponse))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<SetInstructionBreakpointsResponse>)SetInstructionBreakpointsResponseFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<SetInstructionBreakpointsResponse>)SetInstructionBreakpointsResponseFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(ContinueRequest))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<ContinueRequest>)ContinueRequestFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<ContinueRequest>)ContinueRequestFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(ContinueArguments))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<ContinueArguments>)ContinueArgumentsFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<ContinueArguments>)ContinueArgumentsFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(ContinueResponseBody))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<ContinueResponseBody>)ContinueResponseBodyFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<ContinueResponseBody>)ContinueResponseBodyFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(ContinueResponse))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<ContinueResponse>)ContinueResponseFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<ContinueResponse>)ContinueResponseFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(NextRequest))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<NextRequest>)NextRequestFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<NextRequest>)NextRequestFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(NextArguments))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<NextArguments>)NextArgumentsFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<NextArguments>)NextArgumentsFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(NextResponse))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<NextResponse>)NextResponseFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<NextResponse>)NextResponseFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(StepInRequest))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<StepInRequest>)StepInRequestFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<StepInRequest>)StepInRequestFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(StepInArguments))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<StepInArguments>)StepInArgumentsFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<StepInArguments>)StepInArgumentsFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(StepInResponse))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<StepInResponse>)StepInResponseFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<StepInResponse>)StepInResponseFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(StepOutRequest))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<StepOutRequest>)StepOutRequestFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<StepOutRequest>)StepOutRequestFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(StepOutArguments))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<StepOutArguments>)StepOutArgumentsFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<StepOutArguments>)StepOutArgumentsFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(StepOutResponse))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<StepOutResponse>)StepOutResponseFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<StepOutResponse>)StepOutResponseFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(StepBackRequest))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<StepBackRequest>)StepBackRequestFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<StepBackRequest>)StepBackRequestFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(StepBackArguments))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<StepBackArguments>)StepBackArgumentsFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<StepBackArguments>)StepBackArgumentsFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(StepBackResponse))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<StepBackResponse>)StepBackResponseFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<StepBackResponse>)StepBackResponseFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(ReverseContinueRequest))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<ReverseContinueRequest>)ReverseContinueRequestFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<ReverseContinueRequest>)ReverseContinueRequestFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(ReverseContinueArguments))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<ReverseContinueArguments>)ReverseContinueArgumentsFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<ReverseContinueArguments>)ReverseContinueArgumentsFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(ReverseContinueResponse))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<ReverseContinueResponse>)ReverseContinueResponseFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<ReverseContinueResponse>)ReverseContinueResponseFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(RestartFrameRequest))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<RestartFrameRequest>)RestartFrameRequestFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<RestartFrameRequest>)RestartFrameRequestFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(RestartFrameArguments))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<RestartFrameArguments>)RestartFrameArgumentsFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<RestartFrameArguments>)RestartFrameArgumentsFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(RestartFrameResponse))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<RestartFrameResponse>)RestartFrameResponseFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<RestartFrameResponse>)RestartFrameResponseFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(GotoRequest))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<GotoRequest>)GotoRequestFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<GotoRequest>)GotoRequestFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(GotoArguments))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<GotoArguments>)GotoArgumentsFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<GotoArguments>)GotoArgumentsFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(GotoResponse))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<GotoResponse>)GotoResponseFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<GotoResponse>)GotoResponseFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(PauseRequest))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<PauseRequest>)PauseRequestFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<PauseRequest>)PauseRequestFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(PauseArguments))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<PauseArguments>)PauseArgumentsFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<PauseArguments>)PauseArgumentsFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(PauseResponse))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<PauseResponse>)PauseResponseFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<PauseResponse>)PauseResponseFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(StackTraceRequest))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<StackTraceRequest>)StackTraceRequestFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<StackTraceRequest>)StackTraceRequestFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(StackTraceArguments))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<StackTraceArguments>)StackTraceArgumentsFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<StackTraceArguments>)StackTraceArgumentsFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(StackTraceResponseBody))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<StackTraceResponseBody>)StackTraceResponseBodyFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<StackTraceResponseBody>)StackTraceResponseBodyFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(StackTraceResponse))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<StackTraceResponse>)StackTraceResponseFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<StackTraceResponse>)StackTraceResponseFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(ScopesRequest))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<ScopesRequest>)ScopesRequestFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<ScopesRequest>)ScopesRequestFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(ScopesArguments))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<ScopesArguments>)ScopesArgumentsFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<ScopesArguments>)ScopesArgumentsFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(ScopesResponseBody))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<ScopesResponseBody>)ScopesResponseBodyFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<ScopesResponseBody>)ScopesResponseBodyFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(ScopesResponse))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<ScopesResponse>)ScopesResponseFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<ScopesResponse>)ScopesResponseFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(VariablesRequest))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<VariablesRequest>)VariablesRequestFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<VariablesRequest>)VariablesRequestFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(VariablesArgumentsFilter))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<VariablesArgumentsFilter>)VariablesArgumentsFilterFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<VariablesArgumentsFilter>)VariablesArgumentsFilterFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(VariablesArguments))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<VariablesArguments>)VariablesArgumentsFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<VariablesArguments>)VariablesArgumentsFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(VariablesResponseBody))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<VariablesResponseBody>)VariablesResponseBodyFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<VariablesResponseBody>)VariablesResponseBodyFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(VariablesResponse))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<VariablesResponse>)VariablesResponseFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<VariablesResponse>)VariablesResponseFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(SetVariableRequest))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<SetVariableRequest>)SetVariableRequestFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<SetVariableRequest>)SetVariableRequestFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(SetVariableArguments))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<SetVariableArguments>)SetVariableArgumentsFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<SetVariableArguments>)SetVariableArgumentsFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(SetVariableResponseBody))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<SetVariableResponseBody>)SetVariableResponseBodyFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<SetVariableResponseBody>)SetVariableResponseBodyFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(SetVariableResponse))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<SetVariableResponse>)SetVariableResponseFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<SetVariableResponse>)SetVariableResponseFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(SourceRequest))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<SourceRequest>)SourceRequestFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<SourceRequest>)SourceRequestFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(SourceArguments))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<SourceArguments>)SourceArgumentsFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<SourceArguments>)SourceArgumentsFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(SourceResponseBody))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<SourceResponseBody>)SourceResponseBodyFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<SourceResponseBody>)SourceResponseBodyFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(SourceResponse))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<SourceResponse>)SourceResponseFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<SourceResponse>)SourceResponseFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(ThreadsRequest))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<ThreadsRequest>)ThreadsRequestFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<ThreadsRequest>)ThreadsRequestFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(ThreadsResponseBody))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<ThreadsResponseBody>)ThreadsResponseBodyFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<ThreadsResponseBody>)ThreadsResponseBodyFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(ThreadsResponse))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<ThreadsResponse>)ThreadsResponseFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<ThreadsResponse>)ThreadsResponseFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(TerminateThreadsRequest))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<TerminateThreadsRequest>)TerminateThreadsRequestFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<TerminateThreadsRequest>)TerminateThreadsRequestFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(TerminateThreadsArguments))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<TerminateThreadsArguments>)TerminateThreadsArgumentsFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<TerminateThreadsArguments>)TerminateThreadsArgumentsFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(TerminateThreadsResponse))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<TerminateThreadsResponse>)TerminateThreadsResponseFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<TerminateThreadsResponse>)TerminateThreadsResponseFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(ModulesRequest))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<ModulesRequest>)ModulesRequestFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<ModulesRequest>)ModulesRequestFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(ModulesArguments))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<ModulesArguments>)ModulesArgumentsFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<ModulesArguments>)ModulesArgumentsFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(ModulesResponseBody))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<ModulesResponseBody>)ModulesResponseBodyFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<ModulesResponseBody>)ModulesResponseBodyFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(ModulesResponse))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<ModulesResponse>)ModulesResponseFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<ModulesResponse>)ModulesResponseFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(LoadedSourcesRequest))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<LoadedSourcesRequest>)LoadedSourcesRequestFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<LoadedSourcesRequest>)LoadedSourcesRequestFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(LoadedSourcesArguments))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<LoadedSourcesArguments>)LoadedSourcesArgumentsFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<LoadedSourcesArguments>)LoadedSourcesArgumentsFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(LoadedSourcesResponseBody))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<LoadedSourcesResponseBody>)LoadedSourcesResponseBodyFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<LoadedSourcesResponseBody>)LoadedSourcesResponseBodyFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(LoadedSourcesResponse))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<LoadedSourcesResponse>)LoadedSourcesResponseFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<LoadedSourcesResponse>)LoadedSourcesResponseFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(EvaluateRequest))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<EvaluateRequest>)EvaluateRequestFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<EvaluateRequest>)EvaluateRequestFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(EvaluateArguments))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<EvaluateArguments>)EvaluateArgumentsFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<EvaluateArguments>)EvaluateArgumentsFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(EvaluateResponseBody))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<EvaluateResponseBody>)EvaluateResponseBodyFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<EvaluateResponseBody>)EvaluateResponseBodyFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(EvaluateResponse))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<EvaluateResponse>)EvaluateResponseFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<EvaluateResponse>)EvaluateResponseFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(SetExpressionRequest))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<SetExpressionRequest>)SetExpressionRequestFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<SetExpressionRequest>)SetExpressionRequestFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(SetExpressionArguments))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<SetExpressionArguments>)SetExpressionArgumentsFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<SetExpressionArguments>)SetExpressionArgumentsFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(SetExpressionResponseBody))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<SetExpressionResponseBody>)SetExpressionResponseBodyFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<SetExpressionResponseBody>)SetExpressionResponseBodyFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(SetExpressionResponse))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<SetExpressionResponse>)SetExpressionResponseFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<SetExpressionResponse>)SetExpressionResponseFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(StepInTargetsRequest))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<StepInTargetsRequest>)StepInTargetsRequestFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<StepInTargetsRequest>)StepInTargetsRequestFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(StepInTargetsArguments))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<StepInTargetsArguments>)StepInTargetsArgumentsFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<StepInTargetsArguments>)StepInTargetsArgumentsFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(StepInTargetsResponseBody))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<StepInTargetsResponseBody>)StepInTargetsResponseBodyFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<StepInTargetsResponseBody>)StepInTargetsResponseBodyFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(StepInTargetsResponse))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<StepInTargetsResponse>)StepInTargetsResponseFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<StepInTargetsResponse>)StepInTargetsResponseFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(GotoTargetsRequest))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<GotoTargetsRequest>)GotoTargetsRequestFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<GotoTargetsRequest>)GotoTargetsRequestFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(GotoTargetsArguments))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<GotoTargetsArguments>)GotoTargetsArgumentsFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<GotoTargetsArguments>)GotoTargetsArgumentsFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(GotoTargetsResponseBody))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<GotoTargetsResponseBody>)GotoTargetsResponseBodyFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<GotoTargetsResponseBody>)GotoTargetsResponseBodyFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(GotoTargetsResponse))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<GotoTargetsResponse>)GotoTargetsResponseFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<GotoTargetsResponse>)GotoTargetsResponseFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(CompletionsRequest))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<CompletionsRequest>)CompletionsRequestFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<CompletionsRequest>)CompletionsRequestFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(CompletionsArguments))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<CompletionsArguments>)CompletionsArgumentsFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<CompletionsArguments>)CompletionsArgumentsFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(CompletionsResponseBody))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<CompletionsResponseBody>)CompletionsResponseBodyFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<CompletionsResponseBody>)CompletionsResponseBodyFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(CompletionsResponse))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<CompletionsResponse>)CompletionsResponseFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<CompletionsResponse>)CompletionsResponseFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(ExceptionInfoRequest))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<ExceptionInfoRequest>)ExceptionInfoRequestFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<ExceptionInfoRequest>)ExceptionInfoRequestFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(ExceptionInfoArguments))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<ExceptionInfoArguments>)ExceptionInfoArgumentsFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<ExceptionInfoArguments>)ExceptionInfoArgumentsFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(ExceptionInfoResponseBody))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<ExceptionInfoResponseBody>)ExceptionInfoResponseBodyFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<ExceptionInfoResponseBody>)ExceptionInfoResponseBodyFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(ExceptionInfoResponse))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<ExceptionInfoResponse>)ExceptionInfoResponseFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<ExceptionInfoResponse>)ExceptionInfoResponseFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(ReadMemoryRequest))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<ReadMemoryRequest>)ReadMemoryRequestFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<ReadMemoryRequest>)ReadMemoryRequestFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(ReadMemoryArguments))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<ReadMemoryArguments>)ReadMemoryArgumentsFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<ReadMemoryArguments>)ReadMemoryArgumentsFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(ReadMemoryResponseBody))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<ReadMemoryResponseBody>)ReadMemoryResponseBodyFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<ReadMemoryResponseBody>)ReadMemoryResponseBodyFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(ReadMemoryResponse))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<ReadMemoryResponse>)ReadMemoryResponseFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<ReadMemoryResponse>)ReadMemoryResponseFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(WriteMemoryRequest))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<WriteMemoryRequest>)WriteMemoryRequestFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<WriteMemoryRequest>)WriteMemoryRequestFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(WriteMemoryArguments))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<WriteMemoryArguments>)WriteMemoryArgumentsFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<WriteMemoryArguments>)WriteMemoryArgumentsFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(WriteMemoryResponseBody))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<WriteMemoryResponseBody>)WriteMemoryResponseBodyFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<WriteMemoryResponseBody>)WriteMemoryResponseBodyFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(WriteMemoryResponse))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<WriteMemoryResponse>)WriteMemoryResponseFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<WriteMemoryResponse>)WriteMemoryResponseFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(DisassembleRequest))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<DisassembleRequest>)DisassembleRequestFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<DisassembleRequest>)DisassembleRequestFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(DisassembleArguments))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<DisassembleArguments>)DisassembleArgumentsFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<DisassembleArguments>)DisassembleArgumentsFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(DisassembleResponseBody))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<DisassembleResponseBody>)DisassembleResponseBodyFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<DisassembleResponseBody>)DisassembleResponseBodyFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(DisassembleResponse))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<DisassembleResponse>)DisassembleResponseFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<DisassembleResponse>)DisassembleResponseFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(LocationsRequest))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<LocationsRequest>)LocationsRequestFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<LocationsRequest>)LocationsRequestFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(LocationsArguments))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<LocationsArguments>)LocationsArgumentsFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<LocationsArguments>)LocationsArgumentsFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(LocationsResponseBody))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<LocationsResponseBody>)LocationsResponseBodyFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<LocationsResponseBody>)LocationsResponseBodyFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(LocationsResponse))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<LocationsResponse>)LocationsResponseFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<LocationsResponse>)LocationsResponseFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(Capabilities))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<Capabilities>)CapabilitiesFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<Capabilities>)CapabilitiesFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(ExceptionBreakpointsFilter))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<ExceptionBreakpointsFilter>)ExceptionBreakpointsFilterFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<ExceptionBreakpointsFilter>)ExceptionBreakpointsFilterFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(Message))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<Message>)MessageFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<Message>)MessageFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(Module))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<Module>)ModuleFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<Module>)ModuleFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(ColumnDescriptorType))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<ColumnDescriptorType>)ColumnDescriptorTypeFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<ColumnDescriptorType>)ColumnDescriptorTypeFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(ColumnDescriptor))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<ColumnDescriptor>)ColumnDescriptorFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<ColumnDescriptor>)ColumnDescriptorFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(Thread))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<Thread>)ThreadFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<Thread>)ThreadFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(SourcePresentationHint))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<SourcePresentationHint>)SourcePresentationHintFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<SourcePresentationHint>)SourcePresentationHintFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(Source))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<Source>)SourceFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<Source>)SourceFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(StackFramePresentationHint))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<StackFramePresentationHint>)StackFramePresentationHintFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<StackFramePresentationHint>)StackFramePresentationHintFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(StackFrame))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<StackFrame>)StackFrameFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<StackFrame>)StackFrameFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(Scope))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<Scope>)ScopeFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<Scope>)ScopeFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(Variable))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<Variable>)VariableFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<Variable>)VariableFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(VariablePresentationHint))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<VariablePresentationHint>)VariablePresentationHintFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<VariablePresentationHint>)VariablePresentationHintFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(BreakpointLocation))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<BreakpointLocation>)BreakpointLocationFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<BreakpointLocation>)BreakpointLocationFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(SourceBreakpoint))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<SourceBreakpoint>)SourceBreakpointFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<SourceBreakpoint>)SourceBreakpointFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(FunctionBreakpoint))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<FunctionBreakpoint>)FunctionBreakpointFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<FunctionBreakpoint>)FunctionBreakpointFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(DataBreakpointAccessType))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<DataBreakpointAccessType>)DataBreakpointAccessTypeFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<DataBreakpointAccessType>)DataBreakpointAccessTypeFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(DataBreakpoint))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<DataBreakpoint>)DataBreakpointFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<DataBreakpoint>)DataBreakpointFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(InstructionBreakpoint))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<InstructionBreakpoint>)InstructionBreakpointFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<InstructionBreakpoint>)InstructionBreakpointFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(BreakpointReason))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<BreakpointReason>)BreakpointReasonFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<BreakpointReason>)BreakpointReasonFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(Breakpoint))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<Breakpoint>)BreakpointFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<Breakpoint>)BreakpointFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(SteppingGranularity))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<SteppingGranularity>)SteppingGranularityFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<SteppingGranularity>)SteppingGranularityFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(StepInTarget))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<StepInTarget>)StepInTargetFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<StepInTarget>)StepInTargetFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(GotoTarget))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<GotoTarget>)GotoTargetFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<GotoTarget>)GotoTargetFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(CompletionItem))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<CompletionItem>)CompletionItemFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<CompletionItem>)CompletionItemFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(CompletionItemType))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<CompletionItemType>)CompletionItemTypeFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<CompletionItemType>)CompletionItemTypeFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(ChecksumAlgorithm))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<ChecksumAlgorithm>)ChecksumAlgorithmFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<ChecksumAlgorithm>)ChecksumAlgorithmFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(Checksum))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<Checksum>)ChecksumFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<Checksum>)ChecksumFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(ValueFormat))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<ValueFormat>)ValueFormatFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<ValueFormat>)ValueFormatFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(StackFrameFormat))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<StackFrameFormat>)StackFrameFormatFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<StackFrameFormat>)StackFrameFormatFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(ExceptionFilterOptions))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<ExceptionFilterOptions>)ExceptionFilterOptionsFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<ExceptionFilterOptions>)ExceptionFilterOptionsFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(ExceptionOptions))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<ExceptionOptions>)ExceptionOptionsFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<ExceptionOptions>)ExceptionOptionsFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(ExceptionBreakMode))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<ExceptionBreakMode>)ExceptionBreakModeFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<ExceptionBreakMode>)ExceptionBreakModeFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(ExceptionPathSegment))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<ExceptionPathSegment>)ExceptionPathSegmentFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<ExceptionPathSegment>)ExceptionPathSegmentFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(ExceptionDetails))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<ExceptionDetails>)ExceptionDetailsFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<ExceptionDetails>)ExceptionDetailsFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(DisassembledInstructionPresentationHint))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<DisassembledInstructionPresentationHint>)DisassembledInstructionPresentationHintFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<DisassembledInstructionPresentationHint>)DisassembledInstructionPresentationHintFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(DisassembledInstruction))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<DisassembledInstruction>)DisassembledInstructionFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<DisassembledInstruction>)DisassembledInstructionFormatter.Serialize;
+                return;
+            }
+            if (typeof(T) == typeof(BreakpointMode))
+            {
+                Deserialize = (DeserializeDelegate<T>)(object)(DeserializeDelegate<BreakpointMode>)BreakpointModeFormatter.Deserialize;
+                Serialize = (SerializeDelegate<T>)(object)(SerializeDelegate<BreakpointMode>)BreakpointModeFormatter.Serialize;
+                return;
+            }
+        }
     }
     
     public static T Deserialize<T>(global::System.ReadOnlySpan<byte> utf8Json, NoJsonSerializerOptions? options = null)
     {
-        var formatter = Cache<T>.Formatter;
-        if (formatter is null) ThrowNotSupported<T>();
-        return formatter!.Deserialize(utf8Json, options ?? NoJsonSerializerOptions.Default);
+        var del = Cache<T>.Deserialize;
+        if (del is null) ThrowNotSupported<T>();
+        return del!(utf8Json, options ?? NoJsonSerializerOptions.Default);
     }
     
     public static T Deserialize<T>(byte[] utf8Json, NoJsonSerializerOptions? options = null) => Deserialize<T>((global::System.ReadOnlySpan<byte>)utf8Json, options);
     
     public static void Serialize<T>(global::System.Buffers.IBufferWriter<byte> writer, T value, NoJsonSerializerOptions? options = null)
     {
-        var formatter = Cache<T>.Formatter;
-        if (formatter is null) ThrowNotSupported<T>();
-        formatter!.Serialize(writer, in value, options ?? NoJsonSerializerOptions.Default);
+        var del = Cache<T>.Serialize;
+        if (del is null) ThrowNotSupported<T>();
+        del!(writer, value, options ?? NoJsonSerializerOptions.Default);
     }
     
     public static byte[] SerializeToUtf8Bytes<T>(T value, NoJsonSerializerOptions? options = null)
@@ -1133,34 +2567,6 @@ public static class DapSerializer
         var buffer = new global::System.Buffers.ArrayBufferWriter<byte>(256);
         Serialize<T>(buffer, value, options);
         return buffer.WrittenSpan.ToArray();
-    }
-    
-    public static T Deserialize<T>(global::System.IO.Stream stream, NoJsonSerializerOptions? options = null)
-    {
-        var formatter = Cache<T>.Formatter;
-        if (formatter is null) ThrowNotSupported<T>();
-        return formatter!.Deserialize(stream, options ?? NoJsonSerializerOptions.Default);
-    }
-    
-    public static global::System.Threading.Tasks.ValueTask<T> DeserializeAsync<T>(global::System.IO.Stream stream, NoJsonSerializerOptions? options = null, global::System.Threading.CancellationToken cancellationToken = default)
-    {
-        var formatter = Cache<T>.Formatter;
-        if (formatter is null) ThrowNotSupported<T>();
-        return formatter!.DeserializeAsync(stream, options ?? NoJsonSerializerOptions.Default, cancellationToken);
-    }
-    
-    public static void Serialize<T>(global::System.IO.Stream stream, T value, NoJsonSerializerOptions? options = null)
-    {
-        var formatter = Cache<T>.Formatter;
-        if (formatter is null) ThrowNotSupported<T>();
-        formatter!.Serialize(stream, in value, options ?? NoJsonSerializerOptions.Default);
-    }
-    
-    public static global::System.Threading.Tasks.ValueTask SerializeAsync<T>(global::System.IO.Stream stream, T value, NoJsonSerializerOptions? options = null, global::System.Threading.CancellationToken cancellationToken = default)
-    {
-        var formatter = Cache<T>.Formatter;
-        if (formatter is null) ThrowNotSupported<T>();
-        return formatter!.SerializeAsync(stream, value, options ?? NoJsonSerializerOptions.Default, cancellationToken);
     }
     
     [global::System.Diagnostics.CodeAnalysis.DoesNotReturn]

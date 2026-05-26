@@ -6,7 +6,7 @@ using System.Buffers;
 
 namespace Dap;
 
-public static partial class ProcessEventBodyFormatter
+static partial class ProcessEventBodyFormatter
 {
     static global::System.ReadOnlySpan<byte> Name_Name => "\"name\":"u8;
     static global::System.ReadOnlySpan<byte> Name_SystemProcessId => "\"systemProcessId\":"u8;
@@ -14,27 +14,13 @@ public static partial class ProcessEventBodyFormatter
     static global::System.ReadOnlySpan<byte> Name_StartMethod => "\"startMethod\":"u8;
     static global::System.ReadOnlySpan<byte> Name_PointerSize => "\"pointerSize\":"u8;
     
-    public static ProcessEventBody Deserialize(global::System.ReadOnlySpan<byte> utf8Json, NoJsonSerializerOptions? options = null)
+    public static ProcessEventBody Deserialize(global::System.ReadOnlySpan<byte> utf8Json, NoJsonSerializerOptions options)
     {
-        options ??= NoJsonSerializerOptions.Default;
         var tokenizer = new Utf8JsonTokenizer(utf8Json);
         tokenizer.ReadStartObject();
         var value = new ProcessEventBody();
         ReadInto(ref tokenizer, value, options);
         return value;
-    }
-    
-    public static ProcessEventBody Deserialize(byte[] utf8Json, NoJsonSerializerOptions? options = null) => Deserialize((global::System.ReadOnlySpan<byte>)utf8Json, options);
-    
-    public static ProcessEventBody Deserialize(global::System.IO.Stream stream, NoJsonSerializerOptions? options = null)
-    {
-        return Deserialize(NoJsonStreamUtility.ReadAllBytes(stream), options);
-    }
-    
-    public static async global::System.Threading.Tasks.ValueTask<ProcessEventBody> DeserializeAsync(global::System.IO.Stream stream, NoJsonSerializerOptions? options = null, global::System.Threading.CancellationToken cancellationToken = default)
-    {
-        var __bytes = await NoJsonStreamUtility.ReadAllBytesAsync(stream, cancellationToken).ConfigureAwait(false);
-        return Deserialize(__bytes, options);
     }
     
     internal static void ReadInto(ref Utf8JsonTokenizer tokenizer, ProcessEventBody value, NoJsonSerializerOptions options)
@@ -80,7 +66,7 @@ public static partial class ProcessEventBodyFormatter
                         else
                         
                         {
-                            value.PointerSize = tokenizer.ReadInt64();
+                            value.PointerSize = tokenizer.ReadUInt32();
                         }
                     }
                     else
@@ -140,33 +126,11 @@ public static partial class ProcessEventBodyFormatter
         }
     }
     
-    public static void Serialize(global::System.Buffers.IBufferWriter<byte> writer, ProcessEventBody value, NoJsonSerializerOptions? options = null)
+    public static void Serialize(global::System.Buffers.IBufferWriter<byte> writer, in ProcessEventBody value, NoJsonSerializerOptions options)
     {
-        options ??= NoJsonSerializerOptions.Default;
         var w = new Utf8JsonBufferWriter(writer);
         WriteValue(ref w, value, options);
         w.Flush();
-    }
-    
-    public static byte[] SerializeToUtf8Bytes(ProcessEventBody value, NoJsonSerializerOptions? options = null)
-    {
-        var buffer = new global::System.Buffers.ArrayBufferWriter<byte>(256);
-        Serialize(buffer, value, options);
-        return buffer.WrittenSpan.ToArray();
-    }
-    
-    public static void Serialize(global::System.IO.Stream stream, ProcessEventBody value, NoJsonSerializerOptions? options = null)
-    {
-        var __buffer = new global::System.Buffers.ArrayBufferWriter<byte>(256);
-        Serialize(__buffer, value, options);
-        stream.Write(__buffer.WrittenSpan);
-    }
-    
-    public static async global::System.Threading.Tasks.ValueTask SerializeAsync(global::System.IO.Stream stream, ProcessEventBody value, NoJsonSerializerOptions? options = null, global::System.Threading.CancellationToken cancellationToken = default)
-    {
-        var __buffer = new global::System.Buffers.ArrayBufferWriter<byte>(256);
-        Serialize(__buffer, value, options);
-        await stream.WriteAsync(__buffer.WrittenMemory, cancellationToken).ConfigureAwait(false);
     }
     
     internal static void WriteValue(ref Utf8JsonBufferWriter w, ProcessEventBody value, NoJsonSerializerOptions options)
@@ -232,21 +196,8 @@ public static partial class ProcessEventBodyFormatter
         
         {
             w.WritePropertyNameRaw(Name_PointerSize);
-            w.WriteInt64(value.PointerSize.Value);
+            w.WriteUInt32(value.PointerSize.Value);
         }
         w.WriteEndObject();
     }
-}
-
-sealed class ProcessEventBodyFormatterAdapter : INoJsonFormatter<ProcessEventBody>
-{
-    public static readonly ProcessEventBodyFormatterAdapter Instance = new();
-    ProcessEventBodyFormatterAdapter() { }
-    
-    public ProcessEventBody Deserialize(global::System.ReadOnlySpan<byte> utf8Json, NoJsonSerializerOptions options) => ProcessEventBodyFormatter.Deserialize(utf8Json, options);
-    public void Serialize(global::System.Buffers.IBufferWriter<byte> writer, in ProcessEventBody value, NoJsonSerializerOptions options) => ProcessEventBodyFormatter.Serialize(writer, value, options);
-    public ProcessEventBody Deserialize(global::System.IO.Stream stream, NoJsonSerializerOptions options) => ProcessEventBodyFormatter.Deserialize(stream, options);
-    public void Serialize(global::System.IO.Stream stream, in ProcessEventBody value, NoJsonSerializerOptions options) => ProcessEventBodyFormatter.Serialize(stream, value, options);
-    public global::System.Threading.Tasks.ValueTask<ProcessEventBody> DeserializeAsync(global::System.IO.Stream stream, NoJsonSerializerOptions options, global::System.Threading.CancellationToken cancellationToken) => ProcessEventBodyFormatter.DeserializeAsync(stream, options, cancellationToken);
-    public global::System.Threading.Tasks.ValueTask SerializeAsync(global::System.IO.Stream stream, ProcessEventBody value, NoJsonSerializerOptions options, global::System.Threading.CancellationToken cancellationToken) => ProcessEventBodyFormatter.SerializeAsync(stream, value, options, cancellationToken);
 }

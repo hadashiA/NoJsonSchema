@@ -145,17 +145,15 @@ NoJsonSchema emits `User.g.cs`, `Address.g.cs`, `Formatters/UserFormatter.g.cs`,
 ```csharp
 using MyApp.Models;
 
-// Round-trip via the per-type Formatter.
-var user = UserFormatter.Deserialize(utf8Bytes);
-var bytes = UserFormatter.SerializeToUtf8Bytes(user);
+// The namespace-wide Serializer is the entry point.
+var user = MyAppModelsSerializer.Deserialize<User>(utf8Bytes);
+var bytes = MyAppModelsSerializer.SerializeToUtf8Bytes(user);
 
-// Or via the namespace-wide Serializer<T>.
-var u2 = MyAppModelsSerializer.Deserialize<User>(utf8Bytes);
-MyAppModelsSerializer.Serialize(stream, u2);
-
-// Stream / async also work.
-var u3 = await UserFormatter.DeserializeAsync(networkStream, cancellationToken: ct);
+// IBufferWriter<byte> overload too (zero extra copy).
+MyAppModelsSerializer.Serialize(myBufferWriter, user);
 ```
+
+The CLI / source generator stamps a static `{Ns}Serializer` class into the same namespace as the POCOs. Use that — the per-type `XxxFormatter` is internal-by-design (no public surface to lock in).
 
 ## Configuration
 
@@ -296,18 +294,19 @@ Generated/
   User.g.cs                          ← POCO
   Address.g.cs
   Formatters/
-    UserFormatter.g.cs               ← per-type UTF-8 parser/emitter + INoJsonFormatter<T> adapter
+    UserFormatter.g.cs               ← per-type UTF-8 parser/emitter (internal static class)
     AddressFormatter.g.cs
-  MyAppModelsSerializer.g.cs         ← shared options/exception/tokenizer + Cache<T> dispatch
+  MyAppModelsSerializer.g.cs         ← public entry point: Cache<T> + Deserialize<T> / Serialize<T>
+  _IsExternalInitShim.g.cs           ← `init` setter polyfill for netstandard
   _SetsRequiredMembersShim.g.cs      ← only when --use-required and TFM < net7
 ```
 
 Hot-path details (commentary lives in [`Emit/SerializerTemplate.cs`](src/NoJsonSchema.Core/Emit/SerializerTemplate.cs)):
 
-- **Tokenizer / Writer** are `ref struct`s with a `ref byte head` field. `Unsafe.Add` / `Unsafe.CopyBlockUnaligned` instead of span-indexed access — per-byte bounds checks elided on the hot path.
+- **Tokenizer / Writer** are `ref struct`s with a `ref byte head` field on net7+ (Span<byte> + slicing on netstandard 2.1). `Unsafe.Add` / `Unsafe.CopyBlockUnaligned` instead of span-indexed access — per-byte bounds checks elided on the hot path.
 - **WriteString fast path**: bulk `Encoding.UTF8.GetBytes(chars, span)` for ASCII-safe runs, escape only on demand.
 - **Property dispatch** is bucketed by UTF-8 byte length — `switch (__name.Length)` then `SequenceEqual` within bucket. Mismatches short-circuit fast.
-- **Generic dispatch** routes through a per-`T` static `Cache<T>.Formatter` field — `Dictionary<Type, object>` lookup + `Unsafe.As<INoJsonFormatter<T>>` once per CLR generic instantiation. Subsequent calls are a single static-field load + one interface call.
+- **Generic dispatch** routes through a per-`T` static `Cache<T>` with two delegate fields. The `typeof(T) ==` resolution runs once per CLR generic instantiation; subsequent calls are a single static-field load + one delegate invocation. The Cache + delegate types are private-nested in the Serializer, so multiple generated namespaces in the same assembly don't collide.
 - **`Throw*` helpers** are `[DoesNotReturn] [MethodImpl(NoInlining)]` so callers stay inlineable.
 
 ## Compatibility

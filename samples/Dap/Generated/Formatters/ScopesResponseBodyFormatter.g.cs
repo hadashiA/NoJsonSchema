@@ -6,31 +6,17 @@ using System.Buffers;
 
 namespace Dap;
 
-public static partial class ScopesResponseBodyFormatter
+static partial class ScopesResponseBodyFormatter
 {
     static global::System.ReadOnlySpan<byte> Name_Scopes => "\"scopes\":"u8;
     
-    public static ScopesResponseBody Deserialize(global::System.ReadOnlySpan<byte> utf8Json, NoJsonSerializerOptions? options = null)
+    public static ScopesResponseBody Deserialize(global::System.ReadOnlySpan<byte> utf8Json, NoJsonSerializerOptions options)
     {
-        options ??= NoJsonSerializerOptions.Default;
         var tokenizer = new Utf8JsonTokenizer(utf8Json);
         tokenizer.ReadStartObject();
         var value = new ScopesResponseBody();
         ReadInto(ref tokenizer, value, options);
         return value;
-    }
-    
-    public static ScopesResponseBody Deserialize(byte[] utf8Json, NoJsonSerializerOptions? options = null) => Deserialize((global::System.ReadOnlySpan<byte>)utf8Json, options);
-    
-    public static ScopesResponseBody Deserialize(global::System.IO.Stream stream, NoJsonSerializerOptions? options = null)
-    {
-        return Deserialize(NoJsonStreamUtility.ReadAllBytes(stream), options);
-    }
-    
-    public static async global::System.Threading.Tasks.ValueTask<ScopesResponseBody> DeserializeAsync(global::System.IO.Stream stream, NoJsonSerializerOptions? options = null, global::System.Threading.CancellationToken cancellationToken = default)
-    {
-        var __bytes = await NoJsonStreamUtility.ReadAllBytesAsync(stream, cancellationToken).ConfigureAwait(false);
-        return Deserialize(__bytes, options);
     }
     
     internal static void ReadInto(ref Utf8JsonTokenizer tokenizer, ScopesResponseBody value, NoJsonSerializerOptions options)
@@ -69,33 +55,11 @@ public static partial class ScopesResponseBodyFormatter
         }
     }
     
-    public static void Serialize(global::System.Buffers.IBufferWriter<byte> writer, ScopesResponseBody value, NoJsonSerializerOptions? options = null)
+    public static void Serialize(global::System.Buffers.IBufferWriter<byte> writer, in ScopesResponseBody value, NoJsonSerializerOptions options)
     {
-        options ??= NoJsonSerializerOptions.Default;
         var w = new Utf8JsonBufferWriter(writer);
         WriteValue(ref w, value, options);
         w.Flush();
-    }
-    
-    public static byte[] SerializeToUtf8Bytes(ScopesResponseBody value, NoJsonSerializerOptions? options = null)
-    {
-        var buffer = new global::System.Buffers.ArrayBufferWriter<byte>(256);
-        Serialize(buffer, value, options);
-        return buffer.WrittenSpan.ToArray();
-    }
-    
-    public static void Serialize(global::System.IO.Stream stream, ScopesResponseBody value, NoJsonSerializerOptions? options = null)
-    {
-        var __buffer = new global::System.Buffers.ArrayBufferWriter<byte>(256);
-        Serialize(__buffer, value, options);
-        stream.Write(__buffer.WrittenSpan);
-    }
-    
-    public static async global::System.Threading.Tasks.ValueTask SerializeAsync(global::System.IO.Stream stream, ScopesResponseBody value, NoJsonSerializerOptions? options = null, global::System.Threading.CancellationToken cancellationToken = default)
-    {
-        var __buffer = new global::System.Buffers.ArrayBufferWriter<byte>(256);
-        Serialize(__buffer, value, options);
-        await stream.WriteAsync(__buffer.WrittenMemory, cancellationToken).ConfigureAwait(false);
     }
     
     internal static void WriteValue(ref Utf8JsonBufferWriter w, ScopesResponseBody value, NoJsonSerializerOptions options)
@@ -110,17 +74,4 @@ public static partial class ScopesResponseBodyFormatter
         w.WriteEndArray();
         w.WriteEndObject();
     }
-}
-
-sealed class ScopesResponseBodyFormatterAdapter : INoJsonFormatter<ScopesResponseBody>
-{
-    public static readonly ScopesResponseBodyFormatterAdapter Instance = new();
-    ScopesResponseBodyFormatterAdapter() { }
-    
-    public ScopesResponseBody Deserialize(global::System.ReadOnlySpan<byte> utf8Json, NoJsonSerializerOptions options) => ScopesResponseBodyFormatter.Deserialize(utf8Json, options);
-    public void Serialize(global::System.Buffers.IBufferWriter<byte> writer, in ScopesResponseBody value, NoJsonSerializerOptions options) => ScopesResponseBodyFormatter.Serialize(writer, value, options);
-    public ScopesResponseBody Deserialize(global::System.IO.Stream stream, NoJsonSerializerOptions options) => ScopesResponseBodyFormatter.Deserialize(stream, options);
-    public void Serialize(global::System.IO.Stream stream, in ScopesResponseBody value, NoJsonSerializerOptions options) => ScopesResponseBodyFormatter.Serialize(stream, value, options);
-    public global::System.Threading.Tasks.ValueTask<ScopesResponseBody> DeserializeAsync(global::System.IO.Stream stream, NoJsonSerializerOptions options, global::System.Threading.CancellationToken cancellationToken) => ScopesResponseBodyFormatter.DeserializeAsync(stream, options, cancellationToken);
-    public global::System.Threading.Tasks.ValueTask SerializeAsync(global::System.IO.Stream stream, ScopesResponseBody value, NoJsonSerializerOptions options, global::System.Threading.CancellationToken cancellationToken) => ScopesResponseBodyFormatter.SerializeAsync(stream, value, options, cancellationToken);
 }

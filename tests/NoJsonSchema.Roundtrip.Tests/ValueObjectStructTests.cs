@@ -43,31 +43,10 @@ public class ValueObjectStructTests(ITestOutputHelper output)
     }
 
     static byte[] SerializeStruct(Assembly asm, string ns, string typeName, object value)
-    {
-        var formatter = asm.GetType($"{ns}.{typeName}Formatter")!;
-        var optsType = asm.GetType($"{ns}.NoJsonSerializerOptions")!;
-        var structType = asm.GetType($"{ns}.{typeName}")!;
-        // Match "in T" parameter; reflection treats it like a regular ref-to-T parameter type.
-        var paramType = structType.MakeByRefType();
-        var method = formatter.GetMethod("SerializeToUtf8Bytes",
-            BindingFlags.Public | BindingFlags.Static, null,
-            [paramType, optsType], null)
-            ?? throw new InvalidOperationException("SerializeToUtf8Bytes(in T) not found");
-        var args = new object?[] { value, null };
-        var bytes = (byte[])method.Invoke(null, args)!;
-        return bytes;
-    }
+        => RoundtripReflection.SerializeToUtf8Bytes(asm, ns, asm.GetType($"{ns}.{typeName}")!, value);
 
     static object DeserializeStruct(Assembly asm, string ns, string typeName, byte[] bytes)
-    {
-        var formatter = asm.GetType($"{ns}.{typeName}Formatter")!;
-        var optsType = asm.GetType($"{ns}.NoJsonSerializerOptions")!;
-        var method = formatter.GetMethod("Deserialize",
-            BindingFlags.Public | BindingFlags.Static, null,
-            [typeof(byte[]), optsType], null)
-            ?? throw new InvalidOperationException("Deserialize(byte[]) not found");
-        return method.Invoke(null, [bytes, null])!;
-    }
+        => RoundtripReflection.Deserialize(asm, ns, typeName, bytes);
 
     void Dump(GenerationResult r)
     {
@@ -153,21 +132,72 @@ public class ValueObjectStructTests(ITestOutputHelper output)
         pixelType.GetProperty("Y")!.SetValue(pixel, 20);
         pixelType.GetProperty("Color")!.SetValue(pixel, color);
 
-        var formatter = asm.GetType("VoPixel.PixelFormatter")!;
-        var optsType = asm.GetType("VoPixel.NoJsonSerializerOptions")!;
-        var serialize = formatter.GetMethod("SerializeToUtf8Bytes",
-            BindingFlags.Public | BindingFlags.Static, null, [pixelType, optsType], null)!;
-        var bytes = (byte[])serialize.Invoke(null, [pixel, null])!;
+        var bytes = RoundtripReflection.SerializeToUtf8Bytes(asm, "VoPixel", pixelType, pixel);
         var json = Encoding.UTF8.GetString(bytes);
         output.WriteLine(json);
         Assert.Contains("\"color\":{\"r\":255,\"g\":0,\"b\":128}", json);
 
-        var deserialize = formatter.GetMethod("Deserialize",
-            BindingFlags.Public | BindingFlags.Static, null, [typeof(byte[]), optsType], null)!;
-        var decoded = deserialize.Invoke(null, [bytes, null])!;
+        var decoded = RoundtripReflection.Deserialize(asm, "VoPixel", "Pixel", bytes);
         Assert.Equal(10, pixelType.GetProperty("X")!.GetValue(decoded));
         var decodedColor = pixelType.GetProperty("Color")!.GetValue(decoded);
         Assert.Equal(color, decodedColor);
+    }
+
+    [Fact]
+    public void ValueObject_AsOptionalNestedField_RoundTrips()
+    {
+        // Regression: a class with an OPTIONAL field whose type is a value-object struct used to
+        // emit `WriteValue(ref w, in __vo, options)` where __vo was still T?, breaking the
+        // `in T` parameter expectation. The fix: unwrap with `.Value` inside the non-null branch.
+        const string schema = """
+        {
+          "$defs": {
+            "Args": {
+              "type": "object",
+              "properties": { "restart": { "type": "boolean" } },
+              "required": ["restart"]
+            },
+            "Request": {
+              "type": "object",
+              "properties": {
+                "command":   { "type": "string" },
+                "arguments": { "$ref": "#/$defs/Args" }
+              },
+              "required": ["command"]
+            }
+          }
+        }
+        """;
+        var (asm, gen) = Compile(schema, "VoOpt", "Args");
+        Dump(gen);
+
+        var argsType = asm.GetType("VoOpt.Args")!;
+        var requestType = asm.GetType("VoOpt.Request")!;
+        Assert.True(argsType.IsValueType);
+        Assert.False(requestType.IsValueType);
+
+        // Property type must be Args? (Nullable<Args>) — the case that triggered the original bug.
+        Assert.Equal(typeof(Nullable<>).MakeGenericType(argsType), requestType.GetProperty("Arguments")!.PropertyType);
+
+        var args = argsType.GetConstructors().Single().Invoke([true])!;
+        var request = Activator.CreateInstance(requestType)!;
+        requestType.GetProperty("Command")!.SetValue(request, "disconnect");
+        requestType.GetProperty("Arguments")!.SetValue(request, args);
+
+        var bytes = RoundtripReflection.SerializeToUtf8Bytes(asm, "VoOpt", requestType, request);
+        var json = Encoding.UTF8.GetString(bytes);
+        output.WriteLine(json);
+        Assert.Equal("{\"command\":\"disconnect\",\"arguments\":{\"restart\":true}}", json);
+
+        // Null arguments — SkipNullProperties default omits the field.
+        requestType.GetProperty("Arguments")!.SetValue(request, null);
+        var bytesNull = RoundtripReflection.SerializeToUtf8Bytes(asm, "VoOpt", requestType, request);
+        Assert.Equal("{\"command\":\"disconnect\"}", Encoding.UTF8.GetString(bytesNull));
+
+        // Round-trip back: the optional struct should reconstruct.
+        var decoded = RoundtripReflection.Deserialize(asm, "VoOpt", "Request", bytes);
+        Assert.Equal("disconnect", requestType.GetProperty("Command")!.GetValue(decoded));
+        Assert.Equal(args, requestType.GetProperty("Arguments")!.GetValue(decoded));
     }
 
     [Fact]

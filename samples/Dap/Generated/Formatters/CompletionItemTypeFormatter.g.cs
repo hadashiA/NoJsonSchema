@@ -6,7 +6,7 @@ using System.Buffers;
 
 namespace Dap;
 
-public static partial class CompletionItemTypeFormatter
+static partial class CompletionItemTypeFormatter
 {
     static global::System.ReadOnlySpan<byte> Member_Method => "method"u8;
     static global::System.ReadOnlySpan<byte> Member_Function => "function"u8;
@@ -28,23 +28,10 @@ public static partial class CompletionItemTypeFormatter
     static global::System.ReadOnlySpan<byte> Member_Reference => "reference"u8;
     static global::System.ReadOnlySpan<byte> Member_Customcolor => "customcolor"u8;
     
-    public static CompletionItemType Deserialize(global::System.ReadOnlySpan<byte> utf8Json, NoJsonSerializerOptions? options = null)
+    public static CompletionItemType Deserialize(global::System.ReadOnlySpan<byte> utf8Json, NoJsonSerializerOptions options)
     {
         var tokenizer = new Utf8JsonTokenizer(utf8Json);
         return ReadValue(ref tokenizer);
-    }
-    
-    public static CompletionItemType Deserialize(byte[] utf8Json, NoJsonSerializerOptions? options = null) => Deserialize((global::System.ReadOnlySpan<byte>)utf8Json, options);
-    
-    public static CompletionItemType Deserialize(global::System.IO.Stream stream, NoJsonSerializerOptions? options = null)
-    {
-        return Deserialize(NoJsonStreamUtility.ReadAllBytes(stream), options);
-    }
-    
-    public static async global::System.Threading.Tasks.ValueTask<CompletionItemType> DeserializeAsync(global::System.IO.Stream stream, NoJsonSerializerOptions? options = null, global::System.Threading.CancellationToken cancellationToken = default)
-    {
-        var __bytes = await NoJsonStreamUtility.ReadAllBytesAsync(stream, cancellationToken).ConfigureAwait(false);
-        return Deserialize(__bytes, options);
     }
     
     internal static CompletionItemType ReadValue(ref Utf8JsonTokenizer tokenizer)
@@ -77,32 +64,11 @@ public static partial class CompletionItemTypeFormatter
         return default; // unreachable
     }
     
-    public static void Serialize(global::System.Buffers.IBufferWriter<byte> writer, CompletionItemType value, NoJsonSerializerOptions? options = null)
+    public static void Serialize(global::System.Buffers.IBufferWriter<byte> writer, in CompletionItemType value, NoJsonSerializerOptions options)
     {
         var w = new Utf8JsonBufferWriter(writer);
         WriteValue(ref w, value);
         w.Flush();
-    }
-    
-    public static byte[] SerializeToUtf8Bytes(CompletionItemType value, NoJsonSerializerOptions? options = null)
-    {
-        var buffer = new global::System.Buffers.ArrayBufferWriter<byte>(16);
-        Serialize(buffer, value, options);
-        return buffer.WrittenSpan.ToArray();
-    }
-    
-    public static void Serialize(global::System.IO.Stream stream, CompletionItemType value, NoJsonSerializerOptions? options = null)
-    {
-        var __buffer = new global::System.Buffers.ArrayBufferWriter<byte>(16);
-        Serialize(__buffer, value, options);
-        stream.Write(__buffer.WrittenSpan);
-    }
-    
-    public static async global::System.Threading.Tasks.ValueTask SerializeAsync(global::System.IO.Stream stream, CompletionItemType value, NoJsonSerializerOptions? options = null, global::System.Threading.CancellationToken cancellationToken = default)
-    {
-        var __buffer = new global::System.Buffers.ArrayBufferWriter<byte>(16);
-        Serialize(__buffer, value, options);
-        await stream.WriteAsync(__buffer.WrittenMemory, cancellationToken).ConfigureAwait(false);
     }
     
     internal static void WriteValue(ref Utf8JsonBufferWriter w, CompletionItemType value)
@@ -131,17 +97,4 @@ public static partial class CompletionItemTypeFormatter
             default: throw new global::System.InvalidOperationException("Unknown CompletionItemType value: " + value);
         }
     }
-}
-
-sealed class CompletionItemTypeFormatterAdapter : INoJsonFormatter<CompletionItemType>
-{
-    public static readonly CompletionItemTypeFormatterAdapter Instance = new();
-    CompletionItemTypeFormatterAdapter() { }
-    
-    public CompletionItemType Deserialize(global::System.ReadOnlySpan<byte> utf8Json, NoJsonSerializerOptions options) => CompletionItemTypeFormatter.Deserialize(utf8Json, options);
-    public void Serialize(global::System.Buffers.IBufferWriter<byte> writer, in CompletionItemType value, NoJsonSerializerOptions options) => CompletionItemTypeFormatter.Serialize(writer, value, options);
-    public CompletionItemType Deserialize(global::System.IO.Stream stream, NoJsonSerializerOptions options) => CompletionItemTypeFormatter.Deserialize(stream, options);
-    public void Serialize(global::System.IO.Stream stream, in CompletionItemType value, NoJsonSerializerOptions options) => CompletionItemTypeFormatter.Serialize(stream, value, options);
-    public global::System.Threading.Tasks.ValueTask<CompletionItemType> DeserializeAsync(global::System.IO.Stream stream, NoJsonSerializerOptions options, global::System.Threading.CancellationToken cancellationToken) => CompletionItemTypeFormatter.DeserializeAsync(stream, options, cancellationToken);
-    public global::System.Threading.Tasks.ValueTask SerializeAsync(global::System.IO.Stream stream, CompletionItemType value, NoJsonSerializerOptions options, global::System.Threading.CancellationToken cancellationToken) => CompletionItemTypeFormatter.SerializeAsync(stream, value, options, cancellationToken);
 }

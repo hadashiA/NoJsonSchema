@@ -28,5 +28,5 @@ public partial class ProcessEventBody
     /// <summary>
     /// The size of a pointer or address for this process, in bits. This value may be used by clients when formatting addresses for display.
     /// </summary>
-    public long? PointerSize { get; set; }
+    public uint? PointerSize { get; set; }
 }

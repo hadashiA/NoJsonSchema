@@ -22,13 +22,13 @@ public partial class VariablesArguments
     /// The index of the first variable to return; if omitted children start at 0. If the value of `start` exceeeds the number of available variables, the debug adapter should return an empty array.
     /// The attribute is only honored by a debug adapter if the corresponding capability `supportsVariablePaging` is true.
     /// </summary>
-    public long? Start { get; set; }
+    public uint? Start { get; set; }
     
     /// <summary>
     /// The number of variables to return. If count is missing or 0, all variables are returned. If fewer than `count` variables are returned, the client should assume no further variables are available.
     /// The attribute is only honored by a debug adapter if the corresponding capability `supportsVariablePaging` is true.
     /// </summary>
-    public long? Count { get; set; }
+    public uint? Count { get; set; }
     
     /// <summary>
     /// Specifies details on how to format the Variable values.

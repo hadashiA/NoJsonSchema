@@ -59,51 +59,6 @@ public sealed class NoJsonSerializerOptions
     public bool SkipNullProperties { get; init; } = true;
 }
 
-/// <summary>
-/// Per-type formatter contract — the generic <c>{Ns}Serializer&lt;T&gt;</c> dispatch goes through a
-/// <c>Cache&lt;T&gt;</c> static-initialised once per CLR generic instantiation, then calls into one
-/// of these adapters. Keeps the hot path branch-free without sacrificing extensibility.
-/// </summary>
-public interface INoJsonFormatter<T>
-{
-    T Deserialize(global::System.ReadOnlySpan<byte> utf8Json, NoJsonSerializerOptions options);
-    void Serialize(global::System.Buffers.IBufferWriter<byte> writer, in T value, NoJsonSerializerOptions options);
-
-    T Deserialize(global::System.IO.Stream stream, NoJsonSerializerOptions options);
-    void Serialize(global::System.IO.Stream stream, in T value, NoJsonSerializerOptions options);
-
-    global::System.Threading.Tasks.ValueTask<T> DeserializeAsync(global::System.IO.Stream stream, NoJsonSerializerOptions options, global::System.Threading.CancellationToken cancellationToken);
-    global::System.Threading.Tasks.ValueTask SerializeAsync(global::System.IO.Stream stream, T value, NoJsonSerializerOptions options, global::System.Threading.CancellationToken cancellationToken);
-}
-
-/// <summary>
-/// Shared Stream &lt;-&gt; byte[] helpers. The fast path for in-memory <see cref="global::System.IO.MemoryStream"/>
-/// avoids an extra copy; otherwise the full payload is collected once before parsing.
-/// </summary>
-internal static class NoJsonStreamUtility
-{
-    public static byte[] ReadAllBytes(global::System.IO.Stream stream)
-    {
-        if (stream is global::System.IO.MemoryStream ms && ms.TryGetBuffer(out var seg))
-        {
-            var copy = new byte[seg.Count];
-            global::System.Buffer.BlockCopy(seg.Array!, seg.Offset, copy, 0, seg.Count);
-            return copy;
-        }
-        using var dest = new global::System.IO.MemoryStream();
-        stream.CopyTo(dest);
-        return dest.ToArray();
-    }
-
-    public static async global::System.Threading.Tasks.ValueTask<byte[]> ReadAllBytesAsync(
-        global::System.IO.Stream stream, global::System.Threading.CancellationToken cancellationToken)
-    {
-        using var dest = new global::System.IO.MemoryStream();
-        await stream.CopyToAsync(dest, 81920, cancellationToken).ConfigureAwait(false);
-        return dest.ToArray();
-    }
-}
-
 public sealed class NoJsonFormatException : global::System.Exception
 {
     public NoJsonFormatException(string message, int position, int line = 0, int column = 0)
@@ -757,12 +712,10 @@ ref struct Utf8JsonBufferWriter
     readonly global::System.Buffers.IBufferWriter<byte> writer;
 #if NET7_0_OR_GREATER
     // C# 11 ref-byte field — moves forward via `Unsafe.Add` on every Advance.
-    ref byte spanHead;
+    ref byte bufferReference;
 #else
-    // Pre-net7: hold the rented span + an int offset. SpanHeadRef() turns the pair into a
-    // `ref byte` on demand; JIT inlines it to one ADD instruction.
-    global::System.Span<byte> currentSpan;
-    int spanOffset;
+    // Pre-net7: hold the rented span (no separate offset — slicing advances the view).
+    global::System.Span<byte> bufferReference;
 #endif
     int spanRemaining;
     int pending;
@@ -772,10 +725,9 @@ ref struct Utf8JsonBufferWriter
     {
         this.writer = writer;
 #if NET7_0_OR_GREATER
-        spanHead = ref global::System.Runtime.CompilerServices.Unsafe.NullRef<byte>();
+        bufferReference = ref global::System.Runtime.CompilerServices.Unsafe.NullRef<byte>();
 #else
-        currentSpan = default;
-        spanOffset = 0;
+        bufferReference = default;
 #endif
         spanRemaining = 0;
         pending = 0;
@@ -788,25 +740,26 @@ ref struct Utf8JsonBufferWriter
         {
             writer.Advance(pending);
 #if NET7_0_OR_GREATER
-            spanHead = ref global::System.Runtime.CompilerServices.Unsafe.NullRef<byte>();
+            bufferReference = ref global::System.Runtime.CompilerServices.Unsafe.NullRef<byte>();
 #else
-            currentSpan = default;
-            spanOffset = 0;
+            bufferReference = default;
 #endif
             spanRemaining = 0;
             pending = 0;
         }
     }
 
-    /// <summary>Writable <c>ref byte</c> at the current write head. JIT-inlines to a single addr math.</summary>
+    /// <summary>Writable <c>ref byte</c> at <paramref name="offset"/> past the current write head.
+    /// JIT-inlines to a single ADD on net7+, and to <c>MemoryMarshal.GetReference + offset</c> on
+    /// netstandard. Callers use it as the LHS of an assignment (e.g. <c>GetByte(3) = b;</c>).</summary>
     [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
-    ref byte SpanHeadRef() =>
+    ref byte GetByte(int offset) =>
 #if NET7_0_OR_GREATER
-        ref spanHead;
+        ref global::System.Runtime.CompilerServices.Unsafe.Add(ref bufferReference, offset);
 #else
         ref global::System.Runtime.CompilerServices.Unsafe.Add(
-            ref global::System.Runtime.InteropServices.MemoryMarshal.GetReference(currentSpan),
-            spanOffset);
+            ref global::System.Runtime.InteropServices.MemoryMarshal.GetReference(bufferReference),
+            offset);
 #endif
 
     public void WriteStartObject() { MaybeSeparator(); AppendByte((byte)'{'); needsSeparator = false; }
@@ -1005,12 +958,12 @@ ref struct Utf8JsonBufferWriter
                     if (c < 0x20)
                     {
                         Ensure(6);
-                        global::System.Runtime.CompilerServices.Unsafe.Add(ref SpanHeadRef(), 0) = (byte)'\\';
-                        global::System.Runtime.CompilerServices.Unsafe.Add(ref SpanHeadRef(), 1) = (byte)'u';
-                        global::System.Runtime.CompilerServices.Unsafe.Add(ref SpanHeadRef(), 2) = (byte)'0';
-                        global::System.Runtime.CompilerServices.Unsafe.Add(ref SpanHeadRef(), 3) = (byte)'0';
-                        global::System.Runtime.CompilerServices.Unsafe.Add(ref SpanHeadRef(), 4) = HexByte((c >> 4) & 0xF);
-                        global::System.Runtime.CompilerServices.Unsafe.Add(ref SpanHeadRef(), 5) = HexByte(c & 0xF);
+                        GetByte(0) = (byte)'\\';
+                        GetByte(1) = (byte)'u';
+                        GetByte(2) = (byte)'0';
+                        GetByte(3) = (byte)'0';
+                        GetByte(4) = HexByte((c >> 4) & 0xF);
+                        GetByte(5) = HexByte(c & 0xF);
                         Advance(6);
                     }
                     else
@@ -1042,10 +995,10 @@ ref struct Utf8JsonBufferWriter
     {
         Ensure(chars.Length);
 #if NET7_0_OR_GREATER
-        var destSpan = global::System.Runtime.InteropServices.MemoryMarshal.CreateSpan(ref spanHead, chars.Length);
+        var destSpan = global::System.Runtime.InteropServices.MemoryMarshal.CreateSpan(ref bufferReference, chars.Length);
 #else
-        // Slice already-pinned span — no extra allocation, no extra bounds check past Slice itself.
-        var destSpan = currentSpan.Slice(spanOffset, chars.Length);
+        // Slice already-pinned span — bufferReference's start is already the write head.
+        var destSpan = bufferReference.Slice(0, chars.Length);
 #endif
         int written = global::System.Text.Encoding.UTF8.GetBytes(chars, destSpan);
         Advance(written);
@@ -1055,8 +1008,8 @@ ref struct Utf8JsonBufferWriter
     void Append2(byte b0, byte b1)
     {
         Ensure(2);
-        global::System.Runtime.CompilerServices.Unsafe.Add(ref SpanHeadRef(), 0) = b0;
-        global::System.Runtime.CompilerServices.Unsafe.Add(ref SpanHeadRef(), 1) = b1;
+        GetByte(0) = b0;
+        GetByte(1) = b1;
         Advance(2);
     }
 
@@ -1065,25 +1018,25 @@ ref struct Utf8JsonBufferWriter
         if (cp < 0x800)
         {
             Ensure(2);
-            global::System.Runtime.CompilerServices.Unsafe.Add(ref SpanHeadRef(), 0) = (byte)(0xC0 | (cp >> 6));
-            global::System.Runtime.CompilerServices.Unsafe.Add(ref SpanHeadRef(), 1) = (byte)(0x80 | (cp & 0x3F));
+            GetByte(0) = (byte)(0xC0 | (cp >> 6));
+            GetByte(1) = (byte)(0x80 | (cp & 0x3F));
             Advance(2);
         }
         else if (cp < 0x10000)
         {
             Ensure(3);
-            global::System.Runtime.CompilerServices.Unsafe.Add(ref SpanHeadRef(), 0) = (byte)(0xE0 | (cp >> 12));
-            global::System.Runtime.CompilerServices.Unsafe.Add(ref SpanHeadRef(), 1) = (byte)(0x80 | ((cp >> 6) & 0x3F));
-            global::System.Runtime.CompilerServices.Unsafe.Add(ref SpanHeadRef(), 2) = (byte)(0x80 | (cp & 0x3F));
+            GetByte(0) = (byte)(0xE0 | (cp >> 12));
+            GetByte(1) = (byte)(0x80 | ((cp >> 6) & 0x3F));
+            GetByte(2) = (byte)(0x80 | (cp & 0x3F));
             Advance(3);
         }
         else
         {
             Ensure(4);
-            global::System.Runtime.CompilerServices.Unsafe.Add(ref SpanHeadRef(), 0) = (byte)(0xF0 | (cp >> 18));
-            global::System.Runtime.CompilerServices.Unsafe.Add(ref SpanHeadRef(), 1) = (byte)(0x80 | ((cp >> 12) & 0x3F));
-            global::System.Runtime.CompilerServices.Unsafe.Add(ref SpanHeadRef(), 2) = (byte)(0x80 | ((cp >> 6) & 0x3F));
-            global::System.Runtime.CompilerServices.Unsafe.Add(ref SpanHeadRef(), 3) = (byte)(0x80 | (cp & 0x3F));
+            GetByte(0) = (byte)(0xF0 | (cp >> 18));
+            GetByte(1) = (byte)(0x80 | ((cp >> 12) & 0x3F));
+            GetByte(2) = (byte)(0x80 | ((cp >> 6) & 0x3F));
+            GetByte(3) = (byte)(0x80 | (cp & 0x3F));
             Advance(4);
         }
     }
@@ -1099,7 +1052,7 @@ ref struct Utf8JsonBufferWriter
     {
         Ensure(data.Length);
         global::System.Runtime.CompilerServices.Unsafe.CopyBlockUnaligned(
-            ref SpanHeadRef(),
+            ref GetByte(0),
             ref global::System.Runtime.InteropServices.MemoryMarshal.GetReference(data),
             (uint)data.Length);
         Advance(data.Length);
@@ -1109,7 +1062,7 @@ ref struct Utf8JsonBufferWriter
     void AppendByte(byte b)
     {
         Ensure(1);
-        SpanHeadRef() = b;
+        GetByte(0) = b;
         Advance(1);
     }
 
@@ -1117,9 +1070,10 @@ ref struct Utf8JsonBufferWriter
     void Advance(int n)
     {
 #if NET7_0_OR_GREATER
-        spanHead = ref global::System.Runtime.CompilerServices.Unsafe.Add(ref spanHead, n);
+        bufferReference = ref global::System.Runtime.CompilerServices.Unsafe.Add(ref bufferReference, n);
 #else
-        spanOffset += n;
+        // Span tracks the head itself via slicing — no separate offset to bump.
+        bufferReference = bufferReference.Slice(n);
 #endif
         spanRemaining -= n;
         pending += n;
@@ -1131,10 +1085,9 @@ ref struct Utf8JsonBufferWriter
         Flush();
         var newSpan = writer.GetSpan(needed > 256 ? needed : 256);
 #if NET7_0_OR_GREATER
-        spanHead = ref global::System.Runtime.InteropServices.MemoryMarshal.GetReference(newSpan);
+        bufferReference = ref global::System.Runtime.InteropServices.MemoryMarshal.GetReference(newSpan);
 #else
-        currentSpan = newSpan;
-        spanOffset = 0;
+        bufferReference = newSpan;
 #endif
         spanRemaining = newSpan.Length;
     }

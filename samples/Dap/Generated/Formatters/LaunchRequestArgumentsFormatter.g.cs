@@ -6,32 +6,18 @@ using System.Buffers;
 
 namespace Dap;
 
-public static partial class LaunchRequestArgumentsFormatter
+static partial class LaunchRequestArgumentsFormatter
 {
     static global::System.ReadOnlySpan<byte> Name_NoDebug => "\"noDebug\":"u8;
     static global::System.ReadOnlySpan<byte> Name_Restart => "\"__restart\":"u8;
     
-    public static LaunchRequestArguments Deserialize(global::System.ReadOnlySpan<byte> utf8Json, NoJsonSerializerOptions? options = null)
+    public static LaunchRequestArguments Deserialize(global::System.ReadOnlySpan<byte> utf8Json, NoJsonSerializerOptions options)
     {
-        options ??= NoJsonSerializerOptions.Default;
         var tokenizer = new Utf8JsonTokenizer(utf8Json);
         tokenizer.ReadStartObject();
         var value = new LaunchRequestArguments();
         ReadInto(ref tokenizer, value, options);
         return value;
-    }
-    
-    public static LaunchRequestArguments Deserialize(byte[] utf8Json, NoJsonSerializerOptions? options = null) => Deserialize((global::System.ReadOnlySpan<byte>)utf8Json, options);
-    
-    public static LaunchRequestArguments Deserialize(global::System.IO.Stream stream, NoJsonSerializerOptions? options = null)
-    {
-        return Deserialize(NoJsonStreamUtility.ReadAllBytes(stream), options);
-    }
-    
-    public static async global::System.Threading.Tasks.ValueTask<LaunchRequestArguments> DeserializeAsync(global::System.IO.Stream stream, NoJsonSerializerOptions? options = null, global::System.Threading.CancellationToken cancellationToken = default)
-    {
-        var __bytes = await NoJsonStreamUtility.ReadAllBytesAsync(stream, cancellationToken).ConfigureAwait(false);
-        return Deserialize(__bytes, options);
     }
     
     internal static void ReadInto(ref Utf8JsonTokenizer tokenizer, LaunchRequestArguments value, NoJsonSerializerOptions options)
@@ -91,33 +77,11 @@ public static partial class LaunchRequestArgumentsFormatter
         }
     }
     
-    public static void Serialize(global::System.Buffers.IBufferWriter<byte> writer, LaunchRequestArguments value, NoJsonSerializerOptions? options = null)
+    public static void Serialize(global::System.Buffers.IBufferWriter<byte> writer, in LaunchRequestArguments value, NoJsonSerializerOptions options)
     {
-        options ??= NoJsonSerializerOptions.Default;
         var w = new Utf8JsonBufferWriter(writer);
         WriteValue(ref w, value, options);
         w.Flush();
-    }
-    
-    public static byte[] SerializeToUtf8Bytes(LaunchRequestArguments value, NoJsonSerializerOptions? options = null)
-    {
-        var buffer = new global::System.Buffers.ArrayBufferWriter<byte>(256);
-        Serialize(buffer, value, options);
-        return buffer.WrittenSpan.ToArray();
-    }
-    
-    public static void Serialize(global::System.IO.Stream stream, LaunchRequestArguments value, NoJsonSerializerOptions? options = null)
-    {
-        var __buffer = new global::System.Buffers.ArrayBufferWriter<byte>(256);
-        Serialize(__buffer, value, options);
-        stream.Write(__buffer.WrittenSpan);
-    }
-    
-    public static async global::System.Threading.Tasks.ValueTask SerializeAsync(global::System.IO.Stream stream, LaunchRequestArguments value, NoJsonSerializerOptions? options = null, global::System.Threading.CancellationToken cancellationToken = default)
-    {
-        var __buffer = new global::System.Buffers.ArrayBufferWriter<byte>(256);
-        Serialize(__buffer, value, options);
-        await stream.WriteAsync(__buffer.WrittenMemory, cancellationToken).ConfigureAwait(false);
     }
     
     internal static void WriteValue(ref Utf8JsonBufferWriter w, LaunchRequestArguments value, NoJsonSerializerOptions options)
@@ -155,17 +119,4 @@ public static partial class LaunchRequestArgumentsFormatter
         }
         w.WriteEndObject();
     }
-}
-
-sealed class LaunchRequestArgumentsFormatterAdapter : INoJsonFormatter<LaunchRequestArguments>
-{
-    public static readonly LaunchRequestArgumentsFormatterAdapter Instance = new();
-    LaunchRequestArgumentsFormatterAdapter() { }
-    
-    public LaunchRequestArguments Deserialize(global::System.ReadOnlySpan<byte> utf8Json, NoJsonSerializerOptions options) => LaunchRequestArgumentsFormatter.Deserialize(utf8Json, options);
-    public void Serialize(global::System.Buffers.IBufferWriter<byte> writer, in LaunchRequestArguments value, NoJsonSerializerOptions options) => LaunchRequestArgumentsFormatter.Serialize(writer, value, options);
-    public LaunchRequestArguments Deserialize(global::System.IO.Stream stream, NoJsonSerializerOptions options) => LaunchRequestArgumentsFormatter.Deserialize(stream, options);
-    public void Serialize(global::System.IO.Stream stream, in LaunchRequestArguments value, NoJsonSerializerOptions options) => LaunchRequestArgumentsFormatter.Serialize(stream, value, options);
-    public global::System.Threading.Tasks.ValueTask<LaunchRequestArguments> DeserializeAsync(global::System.IO.Stream stream, NoJsonSerializerOptions options, global::System.Threading.CancellationToken cancellationToken) => LaunchRequestArgumentsFormatter.DeserializeAsync(stream, options, cancellationToken);
-    public global::System.Threading.Tasks.ValueTask SerializeAsync(global::System.IO.Stream stream, LaunchRequestArguments value, NoJsonSerializerOptions options, global::System.Threading.CancellationToken cancellationToken) => LaunchRequestArgumentsFormatter.SerializeAsync(stream, value, options, cancellationToken);
 }

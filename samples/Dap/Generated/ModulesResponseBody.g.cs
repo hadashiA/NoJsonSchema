@@ -13,5 +13,5 @@ public partial class ModulesResponseBody
     /// <summary>
     /// The total number of modules available.
     /// </summary>
-    public long? TotalModules { get; set; }
+    public ulong? TotalModules { get; set; }
 }

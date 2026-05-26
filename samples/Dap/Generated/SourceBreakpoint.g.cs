@@ -11,12 +11,12 @@ public partial class SourceBreakpoint
     /// <summary>
     /// The source line of the breakpoint or logpoint.
     /// </summary>
-    public long Line { get; set; }
+    public ulong Line { get; set; }
     
     /// <summary>
     /// Start position within source line of the breakpoint or logpoint. It is measured in UTF-16 code units and the client capability `columnsStartAt1` determines whether it is 0- or 1-based.
     /// </summary>
-    public long? Column { get; set; }
+    public ulong? Column { get; set; }
     
     /// <summary>
     /// The expression for conditional breakpoints.

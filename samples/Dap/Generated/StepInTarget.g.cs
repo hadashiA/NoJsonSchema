@@ -21,20 +21,20 @@ public partial class StepInTarget
     /// <summary>
     /// The line of the step-in target.
     /// </summary>
-    public long? Line { get; set; }
+    public ulong? Line { get; set; }
     
     /// <summary>
     /// Start position of the range covered by the step in target. It is measured in UTF-16 code units and the client capability `columnsStartAt1` determines whether it is 0- or 1-based.
     /// </summary>
-    public long? Column { get; set; }
+    public ulong? Column { get; set; }
     
     /// <summary>
     /// The end line of the range covered by the step-in target.
     /// </summary>
-    public long? EndLine { get; set; }
+    public ulong? EndLine { get; set; }
     
     /// <summary>
     /// End position of the range covered by the step in target. It is measured in UTF-16 code units and the client capability `columnsStartAt1` determines whether it is 0- or 1-based.
     /// </summary>
-    public long? EndColumn { get; set; }
+    public ulong? EndColumn { get; set; }
 }
