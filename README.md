@@ -6,7 +6,9 @@
 
 **Generate C# types and a zero-dependency UTF-8 JSON parser/emitter from JSON Schema.**
 
-Point NoJsonSchema at a JSON Schema (Draft 2020-12 / Draft-07) or OpenAPI 3.x document and it emits:
+NoJsonSchema takes a JSON Schema Draft 2020-12, Draft-07, or OpenAPI 3.x document and generates C# models plus UTF-8 JSON serialization code at build time.
+
+The generated output consists of:
 
 1. **POCO types** — `class` / `record` / `readonly record struct`, your choice per type.
 2. **A per-type Formatter** — UTF-8 parser and emitter built on `ref byte` + `Unsafe.Add`.
@@ -23,42 +25,100 @@ The generated `.cs` files reference **nothing except the BCL** — no `System.Te
 
 That means:
 
-- **Native AOT** works out of the box. Nothing to root in `rd.xml`, no warnings.
-- **Unity / IL2CPP** can swallow it whole. No `System.Text.Json`, no `Newtonsoft Json` , no `JsonUtility`.
-- **Trimming (`PublishTrimmed=true`)** is safe. The generator doesn't emit anything that survives trim analysis as un-rooted reflection.
+- **Native AOT** works without reflection roots or `rd.xml` entries.
+- **Unity / IL2CPP** can use the generated code without depending on `System.Text.Json`, `Newtonsoft.Json`, or `JsonUtility`.
+- **Trimming (`PublishTrimmed=true`)** is safe because the generator doesn't emit anything that survives trim analysis as un-rooted reflection.
 
-The Core library itself (`NoJsonSchema.dll`) does depend on `System.Text.Json` — but only for reading the schema document at *generator time*. None of that touches your shipped binary.
+The Core library itself (`NoJsonSchema.dll`) depends on `System.Text.Json` — but only for reading the schema document at *generator time*. None of that touches your shipped binary.
 
 ## Why
+
+NoJsonSchema is for schema-first projects: cases where the JSON contract is shared, published, or generated outside your C# codebase, and your C# models need to follow it.
+
+Typical cases:
+- A public JSON Schema or OpenAPI document exists, but there is no C# SDK for it.
+- A protocol is defined from a source of truth such as [TypeSpec](https://github.com/microsoft/typespec) or a shared API specification.
+- Your target cares about zero runtime dependencies: Native AOT, Unity / IL2CPP, or trimmed apps.
+
+If your application owns the C# types and only needs a schema as an output, a code-first workflow is usually simpler.
+
+The generated parser/emitter is also built for hot paths:
 
 | | NoJsonSchema | System.Text.Json source-gen |
 |---|---:|---:|
 | Generated code runtime deps | **none** | `System.Text.Json` |
 | Deserialize (8-property DTO) | **416 ns** (1.36× faster) | 565 ns |
 | Serialize (same DTO) | **211 ns** (1.29× faster) | 271 ns |
-| Allocations on deserialize | **856 B** (64%) | 1328 B |
+| Allocations on deserialize | **856 B** (36% less) | 1328 B |
 | Unity / IL2CPP / AOT | ✅ | ✅ (limited) |
 
 (Benchmark: Apple M4 / .NET 10, ShortRun. See [`samples/Bench/`](samples/Bench).)
 
-The main use cases are:
-- When a JSON schema is already published as a general-purpose specification, but a corresponding C# SDK does not exist (or you want to build your own).
-- When a protocol is defined using a schema-first approach, such as [typespec](https://github.com/microsoft/typespec) or etc, and you need to align your code with it.
+## API at a glance
 
-For general applications that are contained entirely within C#, a code-first approach (generating a schema from C# type declarations) is likely more convenient. However, NoJsonSchema might be useful in the use cases mentioned above.
+To get a feel for the generated API, start with a schema like this (`user.json`):
+
+```json
+{
+  "$defs": {
+    "Address": {
+      "type": "object",
+      "properties": {
+        "city": { "type": "string" },
+        "zip":  { "type": "string" }
+      },
+      "required": ["city", "zip"]
+    },
+    "User": {
+      "type": "object",
+      "properties": {
+        "id":      { "type": "integer", "format": "int32" },
+        "name":    { "type": "string" },
+        "email":   { "type": "string" },
+        "joined":  { "type": "string", "format": "date" },
+        "address": { "$ref": "#/$defs/Address" }
+      },
+      "required": ["id", "name"]
+    }
+  }
+}
+```
+
+Generate it with either the source generator (`AdditionalFiles`, shown below) or the CLI (`nojsonschema generate -i user.json -o ./Generated -n MyApp.Models`).
+
+NoJsonSchema emits `User.g.cs`, `Address.g.cs`, `Formatters/UserFormatter.g.cs`, `Formatters/AddressFormatter.g.cs`, and a namespace-wide `MyAppModelsSerializer.g.cs`. You use it like this:
+
+```csharp
+using MyApp.Models;
+
+// The namespace-wide Serializer is the entry point.
+var user = MyAppModelsSerializer.Deserialize<User>(utf8Bytes);
+var bytes = MyAppModelsSerializer.SerializeToUtf8Bytes(user);
+
+// IBufferWriter<byte> overload too (zero extra copy).
+MyAppModelsSerializer.Serialize(myBufferWriter, user);
+```
+
+The CLI / source generator stamps a static `{Namespace}Serializer` class into the same namespace as the POCOs. Use that — the per-type `XxxFormatter` is internal-by-design (no public surface to lock in).
 
 ## Installation
 
-Pick the workflow that matches your project:
+Choose one of three workflows:
+
+- Use the source generator when schemas should be compiled into your project automatically.
+- Use the CLI when you want to vendor generated files or generate many schemas at once.
+- Use the library API when you are building custom tooling.
 
 ### Source generator
+
+Use the source generator when you want NoJsonSchema to generate the API automatically during your build.
 
 ```sh
 dotnet add package NoJsonSchema
 dotnet add package NoJsonSchema.SourceGenerator
 ```
 
-Drop your schemas into the csproj as `AdditionalFiles`:
+Add your schema to the project file as an `AdditionalFiles` item:
 
 ```xml
 <ItemGroup>
@@ -68,7 +128,9 @@ Drop your schemas into the csproj as `AdditionalFiles`:
 </ItemGroup>
 ```
 
-…and the types appear under that namespace on the next build.
+On the next build, the generated types and namespace-wide serializer appear under that namespace.
+
+For the CLI or library workflows, see the sections below.
 
 ### Standalone CLI (good for vendored / bulk generation)
 
@@ -122,51 +184,6 @@ foreach (var f in result.Files)
     File.WriteAllText(Path.Combine("./Generated", f.FileName), f.SourceText);
 ```
 
-## Quick start
-
-Given this schema (`user.json`):
-
-```json
-{
-  "$defs": {
-    "Address": {
-      "type": "object",
-      "properties": {
-        "city": { "type": "string" },
-        "zip":  { "type": "string" }
-      },
-      "required": ["city", "zip"]
-    },
-    "User": {
-      "type": "object",
-      "properties": {
-        "id":      { "type": "integer", "format": "int32" },
-        "name":    { "type": "string" },
-        "email":   { "type": "string" },
-        "joined":  { "type": "string", "format": "date" },
-        "address": { "$ref": "#/$defs/Address" }
-      },
-      "required": ["id", "name"]
-    }
-  }
-}
-```
-
-NoJsonSchema emits `User.g.cs`, `Address.g.cs`, `Formatters/UserFormatter.g.cs`, `Formatters/AddressFormatter.g.cs`, and a namespace-wide `MyAppModelsSerializer.g.cs`. You use it like this:
-
-```csharp
-using MyApp.Models;
-
-// The namespace-wide Serializer is the entry point.
-var user = MyAppModelsSerializer.Deserialize<User>(utf8Bytes);
-var bytes = MyAppModelsSerializer.SerializeToUtf8Bytes(user);
-
-// IBufferWriter<byte> overload too (zero extra copy).
-MyAppModelsSerializer.Serialize(myBufferWriter, user);
-```
-
-The CLI / source generator stamps a static `{Namespace}Serializer` class into the same namespace as the POCOs. Use that — the per-type `XxxFormatter` is internal-by-design (no public surface to lock in).
-
 ## Configuration
 
 All knobs are surfaced through three equivalent channels — MSBuild metadata on the `AdditionalFiles` entry (source generator), CLI flags (`nojsonschema`), and `GenerationOptions` properties (library).
@@ -214,7 +231,7 @@ nojsonschema generate -i <schema> -o <out-dir> [options...]
 | `--allof-strategy` | `Inherit \| Flatten` | `Inherit` | How to represent `allOf` composition. `Inherit` emits a base class + derived class. `Flatten` inlines all parent properties into a single class. |
 | `--strict-extra` | (flag) | `false` | Throw `NoJsonFormatException` when the JSON payload contains a property the schema didn't declare. Otherwise unknown properties are skipped. |
 | `--value-object` | `<csv>` | (empty) | Comma- or semicolon-separated list of `$defs` entries to emit as `readonly partial record struct` (primary-ctor form). E.g. `--value-object Color,SemVer`. Per-type override of `--type-style`. |
-| `--use-required` | (flag) | `false` | Emit the C# 11 `required` modifier on non-nullable required properties. Without this, `= null!` suppresses CS8618 instead. Shipping a `_SetsRequiredMembersShim.g.cs` polyfill for ns2.0/pre-net7 consumers. |
+| `--use-required` | (flag) | `false` | Emit the C# 11 `required` modifier on non-nullable required properties. Without this, `= null!` suppresses CS8618 instead. Ships a `_SetsRequiredMembersShim.g.cs` polyfill for netstandard2.0/pre-net7 consumers. |
 | `--include-type` | `<csv>` | (everything) | Whitelist of top-level `$defs` / `components.schemas` entries to generate. Transitive dependencies are included automatically — e.g. `--include-type Pet` will also pull `Cat`, `Dog` if they're `oneOf` branches. Useful for trimming massive schemas (DAP has 192 defs; you might only need a handful). |
 | `-h`, `--help` | (flag) | | Print usage and exit. |
 
@@ -265,6 +282,8 @@ Exit codes: `0` on success, `1` on any failure (network / IO / parse / schema va
 
 ## Supported schema subset
 
+NoJsonSchema intentionally supports the schema features most common in SDK-style models:
+
 | Construct | Status |
 |---|---|
 | `type: object` with `properties`, `required`, `additionalProperties` (bool / schema) | ✅ |
@@ -284,9 +303,9 @@ Exit codes: `0` on success, `1` on any failure (network / IO / parse / schema va
 
 `format` strings the IR doesn't recognise fall back to the base type (e.g. unknown `string` format → `string`).
 
-## Generated-code shape
+## Generated output
 
-The generator emits one file per type, one Formatter per type, and one namespace-wide Serializer:
+The generator emits one file per type, one formatter per type, and one public serializer class per namespace:
 
 ```
 Generated/
@@ -302,7 +321,7 @@ Generated/
 
 Hot-path details (commentary lives in [`Emit/SerializerTemplate.cs`](src/NoJsonSchema.Core/Emit/SerializerTemplate.cs)):
 
-- **Tokenizer / Writer** are `ref struct`s with a `ref byte head` field on net7+ (Span<byte> + slicing on netstandard 2.1). `Unsafe.Add` / `Unsafe.CopyBlockUnaligned` instead of span-indexed access — per-byte bounds checks elided on the hot path.
+- **Tokenizer / Writer** are `ref struct`s with a `ref byte head` field on net7+ (Span<byte> + slicing on netstandard 2.1). `Unsafe.Add` / `Unsafe.CopyBlockUnaligned` instead of span-indexed access — per-byte bounds checks are elided on the hot path.
 - **WriteString fast path**: bulk `Encoding.UTF8.GetBytes(chars, span)` for ASCII-safe runs, escape only on demand.
 - **Property dispatch** is bucketed by UTF-8 byte length — `switch (__name.Length)` then `SequenceEqual` within bucket. Mismatches short-circuit fast.
 - **Generic dispatch** routes through a per-`T` static `Cache<T>` with two delegate fields. The `typeof(T) ==` resolution runs once per CLR generic instantiation; subsequent calls are a single static-field load + one delegate invocation. The Cache + delegate types are private-nested in the Serializer, so multiple generated namespaces in the same assembly don't collide.
