@@ -164,6 +164,96 @@ public class PolymorphismTests(ITestOutputHelper output)
     }
 
     [Fact]
+    public void PolymorphicBase_WithOwnPropertiesAndAllOfInheritance_IsCarriedToBranches()
+    {
+        // Regression: a polymorphic base used to be emitted as `abstract class Base { }` with
+        // properties + allOf-inherited members silently dropped. Now `Base` must carry both —
+        // and the branches inherit through it. This is the DAP `Request` shape:
+        //   ProtocolMessage  →  Request (abstract, polymorphic by `command`)  →  InitializeRequest / AttachRequest.
+        const string doc = """
+        {
+          "openapi": "3.0.0",
+          "components": {
+            "schemas": {
+              "ProtocolMessage": {
+                "type": "object",
+                "properties": {
+                  "seq":  { "type": "integer", "format": "int32" },
+                  "type": { "type": "string" }
+                },
+                "required": ["seq", "type"]
+              },
+              "Request": {
+                "allOf": [
+                  { "$ref": "#/components/schemas/ProtocolMessage" },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "command":   { "type": "string" },
+                      "arguments": { "type": "string" }
+                    },
+                    "required": ["command"]
+                  }
+                ],
+                "discriminator": { "propertyName": "command" },
+                "oneOf": [
+                  { "$ref": "#/components/schemas/InitializeRequest" },
+                  { "$ref": "#/components/schemas/AttachRequest" }
+                ]
+              },
+              "InitializeRequest": {
+                "type": "object",
+                "properties": {
+                  "command":  { "type": "string" },
+                  "clientID": { "type": "string" }
+                },
+                "required": ["command", "clientID"]
+              },
+              "AttachRequest": {
+                "type": "object",
+                "properties": {
+                  "command": { "type": "string" }
+                },
+                "required": ["command"]
+              }
+            }
+          }
+        }
+        """;
+
+        var (asm, gen) = Compile(doc, "DapLike");
+        foreach (var f in gen.Files.Where(f => f.FileName.EndsWith("Request.g.cs") || f.FileName.EndsWith("ProtocolMessage.g.cs")))
+            output.WriteLine($"--- {f.FileName} ---\n{f.SourceText}");
+
+        var protocolMessage = asm.GetType("DapLike.ProtocolMessage")!;
+        var request = asm.GetType("DapLike.Request")!;
+        var initRequest = asm.GetType("DapLike.InitializeRequest")!;
+
+        // Inheritance chain survived: Request : ProtocolMessage, InitializeRequest : Request.
+        Assert.Equal(protocolMessage, request.BaseType);
+        Assert.Equal(request, initRequest.BaseType);
+        Assert.True(request.IsAbstract);
+
+        // Request itself owns `command`/`arguments` (its own + allOf inline), so the abstract base
+        // doesn't lose them — the previous bug.
+        Assert.NotNull(request.GetProperty("Command"));
+        Assert.NotNull(request.GetProperty("Arguments"));
+        // And the ProtocolMessage chain still gives Seq/Type, reachable through the abstract base.
+        Assert.NotNull(initRequest.GetProperty("Seq"));
+        Assert.NotNull(initRequest.GetProperty("Type"));
+
+        // Round-trip through the polymorphic base — must reconstruct as InitializeRequest with the
+        // full property set (seq + type + command + clientID).
+        var json = "{\"seq\":1,\"type\":\"request\",\"command\":\"InitializeRequest\",\"clientID\":\"vscode\"}";
+        var decoded = RoundtripReflection.Deserialize(asm, "DapLike", "Request", Encoding.UTF8.GetBytes(json));
+        Assert.Equal(initRequest, decoded.GetType());
+        Assert.Equal(1, initRequest.GetProperty("Seq")!.GetValue(decoded));
+        Assert.Equal("request", initRequest.GetProperty("Type")!.GetValue(decoded));
+        Assert.Equal("InitializeRequest", initRequest.GetProperty("Command")!.GetValue(decoded));
+        Assert.Equal("vscode", initRequest.GetProperty("ClientID")!.GetValue(decoded));
+    }
+
+    [Fact]
     public void PolymorphicDispatch_UnknownDiscriminator_Throws()
     {
         const string doc = """

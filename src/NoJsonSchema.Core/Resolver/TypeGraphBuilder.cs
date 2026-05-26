@@ -328,107 +328,10 @@ public sealed class TypeGraphBuilder
     bool TryBuildAllOfDescriptor(string name, SchemaNode schema, out TypeDescriptor descriptor)
     {
         descriptor = null!;
-        var branches = schema.AllOf;
-        if (branches.Count == 0) return false;
-
-        string? baseName = null;
-        var inlineBranches = new List<SchemaNode>();
-
-        foreach (var branch in branches)
-        {
-            if (branch.Ref is not null)
-            {
-                // Primitive aliases can't serve as a base — fall back to flat composition.
-                if (TryResolveAlias(branch.Ref, out _)) return false;
-                if (baseName is not null) return false; // multiple bases — fall back to opaque
-                baseName = refs.ResolveToName(branch.Ref, branch.Pointer);
-                continue;
-            }
-
-            if (branch.Kind != SchemaNodeKind.Object) return false;
-            if (branch.AllOf.Count > 0 || branch.OneOf.Count > 0 || branch.AnyOf.Count > 0 || branch.Not is not null)
-                return false;
-            inlineBranches.Add(branch);
-        }
-
-        // Aggregate required from every inline branch.
-        var requiredAll = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var b in inlineBranches)
-        {
-            foreach (var r in b.Required) requiredAll.Add(r);
-        }
-
-        var properties = new List<PropertyDescriptor>();
-        var seenJson = new HashSet<string>(StringComparer.Ordinal);
-        var siblings = new HashSet<string>(StringComparer.Ordinal);
-
-        // Map of base-chain properties by their JSON name. Lets the derived inline branches:
-        //   - inherit as-is when the inline type matches the base type;
-        //   - emit a narrower override (with `new` modifier) when the type differs.
-        var inherited = new Dictionary<string, PropertyDescriptor>(StringComparer.Ordinal);
-        if (baseName is not null
-            && descriptors.TryGetValue(baseName, out var baseDescriptor)
-            && baseDescriptor is ObjectTypeDescriptor baseObj)
-        {
-            foreach (var bp in WalkInheritedProperties(baseObj))
-            {
-                inherited[bp.JsonName] = bp;
-                siblings.Add(bp.Name);
-            }
-        }
-
-        TypeRef? additional = null;
-        var denied = false;
-
-        foreach (var inline in inlineBranches)
-        {
-            foreach (var (jsonName, propSchema) in inline.Properties)
-            {
-                if (!seenJson.Add(jsonName)) continue; // first inline branch wins
-
-                var (typeRef, hasNull) = BuildPropertyTypeRef(name, jsonName, propSchema);
-
-                if (inherited.TryGetValue(jsonName, out var inheritedProp))
-                {
-                    // Same shape → derived simply inherits it; nothing to add on this type.
-                    if (Equals(inheritedProp.Type, typeRef) && inheritedProp.IsNullable == hasNull)
-                        continue;
-
-                    // Narrower override → re-declare with the inherited C# name and `new` modifier.
-                    properties.Add(new PropertyDescriptor
-                    {
-                        Name = inheritedProp.Name,
-                        JsonName = jsonName,
-                        Type = typeRef,
-                        IsRequired = requiredAll.Contains(jsonName),
-                        IsNullable = hasNull,
-                        Description = propSchema.Description,
-                        SourcePointer = propSchema.Pointer,
-                        HidesBaseProperty = true,
-                    });
-                    continue;
-                }
-
-                var propName = ResolvePropertyName(name, jsonName, siblings);
-                properties.Add(new PropertyDescriptor
-                {
-                    Name = propName,
-                    JsonName = jsonName,
-                    Type = typeRef,
-                    IsRequired = requiredAll.Contains(jsonName),
-                    IsNullable = hasNull,
-                    Description = propSchema.Description,
-                    SourcePointer = propSchema.Pointer,
-                });
-            }
-
-            if (inline.AdditionalProperties is not null)
-            {
-                var (a, d) = ResolveAdditionalProperties(inline, name);
-                additional ??= a;
-                denied = denied || d;
-            }
-        }
+        if (schema.AllOf.Count == 0) return false;
+        if (!TryComposeObjectShape(name, schema,
+                out var baseName, out var properties, out var additional, out var denied))
+            return false;
 
         // Value-object types cannot inherit — surface this as a build error before we generate code.
         if (valueObjectTypes.Contains(name) && baseName is not null)
@@ -452,6 +355,133 @@ public sealed class TypeGraphBuilder
             AdditionalPropertiesDenied = denied,
         };
         return true;
+    }
+
+    /// <summary>
+    /// Shared shape-collector for object descriptors: walks the schema's <c>allOf</c> (extracting a
+    /// single base <c>$ref</c> and any inline branches), combines that with the schema's own
+    /// <c>properties</c>, and produces the (base, properties, additionalProperties, denied) tuple.
+    /// </summary>
+    /// <remarks>
+    /// Used by both <see cref="TryBuildAllOfDescriptor"/> and <see cref="TryBuildPolymorphicDescriptor"/>
+    /// — a polymorphic base ($oneOf + discriminator$) is allowed to *also* declare its own
+    /// properties and inherit via allOf, so both code paths share this logic. Returns false when the
+    /// schema's <c>allOf</c> contains unsupported shapes (multiple bases, nested composition, etc.)
+    /// so callers can fall back to opaque.
+    /// </remarks>
+    bool TryComposeObjectShape(string name, SchemaNode schema,
+        out string? baseName,
+        out List<PropertyDescriptor> properties,
+        out TypeRef? additional,
+        out bool denied)
+    {
+        baseName = null;
+        properties = [];
+        additional = null;
+        denied = false;
+
+        var inlineBranches = new List<SchemaNode>();
+        foreach (var branch in schema.AllOf)
+        {
+            if (branch.Ref is not null)
+            {
+                // Primitive aliases can't serve as a base — fall back to flat composition.
+                if (TryResolveAlias(branch.Ref, out _)) return false;
+                if (baseName is not null) return false; // multiple bases — fall back to opaque
+                baseName = refs.ResolveToName(branch.Ref, branch.Pointer);
+                continue;
+            }
+
+            if (branch.Kind != SchemaNodeKind.Object) return false;
+            if (branch.AllOf.Count > 0 || branch.OneOf.Count > 0 || branch.AnyOf.Count > 0 || branch.Not is not null)
+                return false;
+            inlineBranches.Add(branch);
+        }
+
+        // Aggregate required from the schema's own + every inline allOf branch.
+        var requiredAll = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var r in schema.Required) requiredAll.Add(r);
+        foreach (var b in inlineBranches)
+            foreach (var r in b.Required) requiredAll.Add(r);
+
+        var seenJson = new HashSet<string>(StringComparer.Ordinal);
+        var siblings = new HashSet<string>(StringComparer.Ordinal);
+
+        // Inherited base properties (full chain). Used to detect narrowing overrides — same JSON
+        // name + same type → inherited as-is; different type → emit with `new` modifier.
+        var inherited = new Dictionary<string, PropertyDescriptor>(StringComparer.Ordinal);
+        if (baseName is not null
+            && descriptors.TryGetValue(baseName, out var baseDescriptor)
+            && baseDescriptor is ObjectTypeDescriptor baseObj)
+        {
+            foreach (var bp in WalkInheritedProperties(baseObj))
+            {
+                inherited[bp.JsonName] = bp;
+                siblings.Add(bp.Name);
+            }
+        }
+
+        // Process schema's own properties first (they take precedence on duplicate JSON names),
+        // then each inline allOf branch's properties. Captured as a single list because C# doesn't
+        // let local functions capture `out` parameters.
+        var aggregate = properties;
+        AddFromProps(schema.Properties);
+        foreach (var b in inlineBranches) AddFromProps(b.Properties);
+
+        if (schema.AdditionalProperties is not null)
+        {
+            (additional, denied) = ResolveAdditionalProperties(schema, name);
+        }
+        foreach (var b in inlineBranches)
+        {
+            if (b.AdditionalProperties is null) continue;
+            var (a, d) = ResolveAdditionalProperties(b, name);
+            additional ??= a;
+            denied = denied || d;
+        }
+
+        return true;
+
+        void AddFromProps(IEnumerable<KeyValuePair<string, SchemaNode>> props)
+        {
+            foreach (var (jsonName, propSchema) in props)
+            {
+                if (!seenJson.Add(jsonName)) continue;
+
+                var (typeRef, hasNull) = BuildPropertyTypeRef(name, jsonName, propSchema);
+
+                if (inherited.TryGetValue(jsonName, out var inheritedProp))
+                {
+                    if (Equals(inheritedProp.Type, typeRef) && inheritedProp.IsNullable == hasNull)
+                        continue; // exact match → inherit as-is
+
+                    aggregate.Add(new PropertyDescriptor
+                    {
+                        Name = inheritedProp.Name,
+                        JsonName = jsonName,
+                        Type = typeRef,
+                        IsRequired = requiredAll.Contains(jsonName),
+                        IsNullable = hasNull,
+                        Description = propSchema.Description,
+                        SourcePointer = propSchema.Pointer,
+                        HidesBaseProperty = true,
+                    });
+                    continue;
+                }
+
+                var propName = ResolvePropertyName(name, jsonName, siblings);
+                aggregate.Add(new PropertyDescriptor
+                {
+                    Name = propName,
+                    JsonName = jsonName,
+                    Type = typeRef,
+                    IsRequired = requiredAll.Contains(jsonName),
+                    IsNullable = hasNull,
+                    Description = propSchema.Description,
+                    SourcePointer = propSchema.Pointer,
+                });
+            }
+        }
     }
 
     /// <summary>
@@ -503,6 +533,22 @@ public sealed class TypeGraphBuilder
 
         polymorphicBranchTypeNames[name] = branchTypeNames;
 
+        // A polymorphic base can ALSO declare its own properties + allOf inheritance — share the
+        // shape collector with TryBuildAllOfDescriptor. If allOf has an unsupported shape we fall
+        // back to an empty abstract shell rather than failing, so the polymorphic dispatch still
+        // works even on schemas we can't fully model statically.
+        string? baseName = null;
+        List<PropertyDescriptor> properties = [];
+        TypeRef? additional = null;
+        bool denied = false;
+        if (!TryComposeObjectShape(name, schema, out baseName, out properties, out additional, out denied))
+        {
+            baseName = null;
+            properties = [];
+            additional = null;
+            denied = false;
+        }
+
         descriptor = new ObjectTypeDescriptor
         {
             Name = name,
@@ -511,6 +557,10 @@ public sealed class TypeGraphBuilder
             Description = schema.Description,
             Deprecated = schema.Deprecated,
             IsAbstract = true,
+            BaseTypeName = baseName,
+            Properties = properties,
+            AdditionalProperties = additional,
+            AdditionalPropertiesDenied = denied,
             Polymorphic = new PolymorphicInfo
             {
                 DiscriminatorJsonName = disc.PropertyName,
