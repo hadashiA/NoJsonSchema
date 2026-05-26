@@ -30,9 +30,9 @@ The Core library itself (`NoJsonSchema.dll`) does depend on `System.Text.Json` �
 | | NoJsonSchema | System.Text.Json source-gen |
 |---|---:|---:|
 | Generated code runtime deps | **none** | `System.Text.Json` |
-| Deserialize (8-property DTO) | **416 ns** (0.74×) | 565 ns |
-| Serialize (same DTO) | **211 ns** (0.78×) | 271 ns |
-| Allocations on deserialize | **856 B** (0.64×) | 1328 B |
+| Deserialize (8-property DTO) | **416 ns** (1.36× faster) | 565 ns |
+| Serialize (same DTO) | **211 ns** (1.29× faster) | 271 ns |
+| Allocations on deserialize | **856 B** (64%) | 1328 B |
 | Unity / IL2CPP / AOT | ✅ | ✅ (limited) |
 
 (Benchmark: Apple M4 / .NET 10, ShortRun. See [`samples/Bench/`](samples/Bench).)
