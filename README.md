@@ -51,7 +51,7 @@ For general applications that are contained entirely within C#, a code-first app
 
 Pick the workflow that matches your project:
 
-### Source generato
+### Source generator
 
 ```sh
 dotnet add package NoJsonSchema
