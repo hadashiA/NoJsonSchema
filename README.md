@@ -43,7 +43,7 @@ The Core library itself (`NoJsonSchema.dll`) does depend on `System.Text.Json` â
 
 The main use cases are:
 - When a JSON schema is already published as a general-purpose specification, but a corresponding C# SDK does not exist (or you want to build your own).
-- When a protocol is defined using a schema-first approach, such as https://github.com/microsoft/typespec or JSON-RPC, and you need to align your code with it.
+- When a protocol is defined using a schema-first approach, such as [typespec](https://github.com/microsoft/typespec) or etc, and you need to align your code with it.
 
 For general applications that are contained entirely within C#, a code-first approach (generating a schema from C# type declarations) is likely more convenient. However, NoJsonSchema might be useful in the use cases mentioned above.
 
