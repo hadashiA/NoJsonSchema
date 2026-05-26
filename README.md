@@ -1,5 +1,9 @@
 # NoJsonSchema
 
+[![NuGet](https://img.shields.io/nuget/v/NoJsonSchema.svg?label=NoJsonSchema)](https://www.nuget.org/packages/NoJsonSchema/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
+
 **Generate C# types and a zero-dependency UTF-8 JSON parser/emitter from JSON Schema.**
 
 Point NoJsonSchema at a JSON Schema (Draft 2020-12 / Draft-07) or OpenAPI 3.x document and it emits:
