@@ -1,11 +1,5 @@
 # NoJsonSchema
 
-[![NuGet](https://img.shields.io/nuget/v/NoJsonSchema.svg?label=NoJsonSchema)](https://www.nuget.org/packages/NoJsonSchema/)
-[![NuGet (Generator)](https://img.shields.io/nuget/v/NoJsonSchema.SourceGenerator.svg?label=SourceGenerator)](https://www.nuget.org/packages/NoJsonSchema.SourceGenerator/)
-[![NuGet (CLI)](https://img.shields.io/nuget/v/NoJsonSchema.Cli.svg?label=Cli)](https://www.nuget.org/packages/NoJsonSchema.Cli/)
-[![CI](https://github.com/hadashiA/NoJsonSchema/actions/workflows/ci.yml/badge.svg)](https://github.com/hadashiA/NoJsonSchema/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-
 **Generate C# types and a zero-dependency UTF-8 JSON parser/emitter from JSON Schema.**
 
 Point NoJsonSchema at a JSON Schema (Draft 2020-12 / Draft-07) or OpenAPI 3.x document and it emits:
@@ -23,22 +17,11 @@ JSON Schema  ─►  NoJsonSchema  ─►  C# types + UTF-8 JSON IO  ─►  you
 
 The generated `.cs` files reference **nothing except the BCL** — no `System.Text.Json`, no `Newtonsoft.Json`, no reflection, no third-party packages of any kind. Just `System`, `System.Buffers`, `System.IO`, `System.Runtime.CompilerServices`.
 
-After build, `dotnet list package` for your project looks the same as it did before — NoJsonSchema is gone:
-
-```sh
-$ dotnet add package NoJsonSchema.SourceGenerator
-$ dotnet build
-$ dotnet list package
-# (no NoJsonSchema entries — the generator is build-time only, no runtime carry-over)
-```
-
 That means:
 
-- **Native AOT / `PublishAot=true`** works out of the box. Nothing to root in `rd.xml`, no warnings.
-- **Unity / IL2CPP** can swallow it whole. No `JsonSerializerOptions` configuration, no `[JsonSerializable]` attributes to track, no `TypeInfoResolver` chains.
+- **Native AOT** works out of the box. Nothing to root in `rd.xml`, no warnings.
+- **Unity / IL2CPP** can swallow it whole. No `System.Text.Json`, no `Newtonsoft Json` , no `JsonUtility`.
 - **Trimming (`PublishTrimmed=true`)** is safe. The generator doesn't emit anything that survives trim analysis as un-rooted reflection.
-- **No version skew.** The CLI/SourceGenerator package can bump independently; your app's runtime surface is unaffected because it doesn't link to NoJsonSchema at all.
-- **No transitive STJ pull.** Apps targeting netstandard2.0 that use NoJsonSchema-generated code don't transitively pull `System.Text.Json` 8.x and the chain of `System.Text.Encodings.Web`, `System.Memory`, etc. that comes with it.
 
 The Core library itself (`NoJsonSchema.dll`) does depend on `System.Text.Json` — but only for reading the schema document at *generator time*. None of that touches your shipped binary.
 
@@ -46,7 +29,6 @@ The Core library itself (`NoJsonSchema.dll`) does depend on `System.Text.Json` �
 
 | | NoJsonSchema | System.Text.Json source-gen |
 |---|---:|---:|
-| Schema-first workflow (DAP, OpenAPI, custom JSON Schema) | ✅ | ✋ hand-written DTOs |
 | Generated code runtime deps | **none** | `System.Text.Json` |
 | Deserialize (8-property DTO) | **416 ns** (0.74×) | 565 ns |
 | Serialize (same DTO) | **211 ns** (0.78×) | 271 ns |
@@ -55,11 +37,17 @@ The Core library itself (`NoJsonSchema.dll`) does depend on `System.Text.Json` �
 
 (Benchmark: Apple M4 / .NET 10, ShortRun. See [`samples/Bench/`](samples/Bench).)
 
-## Install
+The main use cases are:
+- When a JSON schema is already published as a general-purpose specification, but a corresponding C# SDK does not exist (or you want to build your own).
+- When a protocol is defined using a schema-first approach, such as https://github.com/microsoft/typespec or JSON-RPC, and you need to align your code with it.
+
+For general applications that are contained entirely within C#, a code-first approach (generating a schema from C# type declarations) is likely more convenient. However, NoJsonSchema might be useful in the use cases mentioned above.
+
+## Installation
 
 Pick the workflow that matches your project:
 
-### Source generator (recommended for app code)
+### Source generato
 
 ```sh
 dotnet add package NoJsonSchema
@@ -86,6 +74,7 @@ dotnet tool install -g NoJsonSchema.Cli
 nojsonschema generate -i schema.json -o ./Generated -n MyApp.Models
 ```
 
+
 The CLI accepts file paths **or** http(s) URLs — point it at a remote schema directly:
 
 ```sh
@@ -93,6 +82,25 @@ nojsonschema generate \
   -i https://raw.githubusercontent.com/microsoft/debug-adapter-protocol/main/debugAdapterProtocol.json \
   -o ./Dap -n Dap
 ```
+
+```
+Usage: generate [options...] [-h|--help] [--version]
+
+Generate C# code from a JSON Schema.
+
+Options:
+  -i, --input <string>                Path or http(s) URL of the JSON Schema. [Required]
+  -o, --output <string>               Directory to write generated .cs files into. [Required]
+  -n, --namespace <string>            Namespace for generated types. [Default: @"Generated"]
+  --root-type <string?>               Optional root type name override. [Default: null]
+  --type-style <TypeStyle>            Type style for objects (Class | Record | ReadonlyRecordStruct). [Default: Class]
+  --allof-strategy <AllOfStrategy>    How to represent allOf composition (Inherit | Flatten). [Default: Inherit]
+  --strict-extra                      Treat unknown JSON properties as errors.
+  --value-object <string[]?>          Comma-separated list of $defs entries to emit as readonly record struct (primary-ctor) value objects. [Default: null]
+  --use-required                      Emit the C# 11 'required' modifier on non-nullable required properties (otherwise '= null!' is used to suppress CS8618).
+  --include-type <string[]?>          Comma-separated whitelist of $defs / components.schemas entries to generate (transitive deps included automatically). Default is everything. [Default: null]
+```
+
 
 ### Library (custom tooling, MSBuild target, Roslyn integration)
 
@@ -153,7 +161,7 @@ var bytes = MyAppModelsSerializer.SerializeToUtf8Bytes(user);
 MyAppModelsSerializer.Serialize(myBufferWriter, user);
 ```
 
-The CLI / source generator stamps a static `{Ns}Serializer` class into the same namespace as the POCOs. Use that — the per-type `XxxFormatter` is internal-by-design (no public surface to lock in).
+The CLI / source generator stamps a static `{Namespace}Serializer` class into the same namespace as the POCOs. Use that — the per-type `XxxFormatter` is internal-by-design (no public surface to lock in).
 
 ## Configuration
 
@@ -272,19 +280,6 @@ Exit codes: `0` on success, `1` on any failure (network / IO / parse / schema va
 
 `format` strings the IR doesn't recognise fall back to the base type (e.g. unknown `string` format → `string`).
 
-## End-to-end: Debug Adapter Protocol
-
-[`samples/Dap/`](samples/Dap) generates the **complete** [Debug Adapter Protocol schema](https://github.com/microsoft/debug-adapter-protocol/blob/main/debugAdapterProtocol.json) — 192 definitions, 226 `$ref`s, 112 `allOf`s, 83 enums.
-
-```sh
-nojsonschema generate \
-  -i samples/Dap/debugAdapterProtocol.json \
-  -o samples/Dap/Generated -n Dap
-# → 495 .cs files, compiles with 0 errors
-```
-
-`tests/NoJsonSchema.DapIntegration.Tests/` round-trips real DAP messages: `InitializeRequest`, `StoppedEvent`, `StackTraceResponse`, the `Checksum` value-object pair, polymorphic dispatch via `oneOf+discriminator`.
-
 ## Generated-code shape
 
 The generator emits one file per type, one Formatter per type, and one namespace-wide Serializer:
@@ -318,49 +313,6 @@ Hot-path details (commentary lives in [`Emit/SerializerTemplate.cs`](src/NoJsonS
 | Unity 2022.3+ / 2023.x (IL2CPP, source generator loadable by bundled Roslyn 4.3) | ✅ |
 | Generated code | targets C# 11 (`ref` fields), so net7+ runtime |
 
-## Roadmap
-
-- [ ] JSON Pointer-based error reporting in `lint`
-- [ ] External `$ref` resolution (cross-document, http)
-- [ ] `pattern` / numeric-bound runtime validation hooks
-- [ ] `anyOf` / `if-then-else` composition
-- [ ] OpenAPI request/response correlation (operation IDs)
-
-## Project layout
-
-```
-src/
-  NoJsonSchema.Core/             ← library: schema loader, IR, emitter
-  NoJsonSchema.SourceGenerator/  ← Roslyn incremental source generator (Unity 2022.3+ compatible)
-  NoJsonSchema.Cli/              ← `nojsonschema` dotnet tool
-samples/
-  Bench/                         ← BenchmarkDotNet vs System.Text.Json source-gen
-  Dap/                           ← Real DAP schema → C# (495 files)
-tests/
-  NoJsonSchema.Core.Tests/
-  NoJsonSchema.Roundtrip.Tests/
-  NoJsonSchema.Snapshot.Tests/
-  NoJsonSchema.SourceGenerator.Tests/
-  NoJsonSchema.DapIntegration.Tests/
-```
-
-## Building from source
-
-```sh
-dotnet build
-dotnet test
-```
-
-To pack release artifacts locally:
-
-```sh
-dotnet pack src/NoJsonSchema.Core/NoJsonSchema.Core.csproj          -c Release -o ./artifacts
-dotnet pack src/NoJsonSchema.SourceGenerator/...                    -c Release -o ./artifacts
-dotnet pack src/NoJsonSchema.Cli/NoJsonSchema.Cli.csproj            -c Release -o ./artifacts
-```
-
-CI publishes to NuGet on `v*` tags via [`.github/workflows/release.yml`](.github/workflows/release.yml).
-
 ## License
 
-MIT. See [`LICENSE`](LICENSE).
+MIT
