@@ -40,12 +40,15 @@ static partial class InvalidatedEventBodyFormatter
                         
                         {
                             tokenizer.ReadStartArray();
-                            var list_Areas = new global::System.Collections.Generic.List<string>();
+                            var buf_Areas = global::System.Array.Empty<string>();
+                            var count_Areas = 0;
                             while (!tokenizer.TryReadEndArray())
                             {
-                                list_Areas.Add(tokenizer.ReadString());
+                                if (count_Areas == buf_Areas.Length) global::System.Array.Resize(ref buf_Areas, buf_Areas.Length == 0 ? 4 : buf_Areas.Length * 2);
+                                buf_Areas[count_Areas++] = tokenizer.ReadString();
                             }
-                            value.Areas = list_Areas.ToArray();
+                            if (count_Areas != buf_Areas.Length) global::System.Array.Resize(ref buf_Areas, count_Areas);
+                            value.Areas = buf_Areas;
                         }
                     }
                     else

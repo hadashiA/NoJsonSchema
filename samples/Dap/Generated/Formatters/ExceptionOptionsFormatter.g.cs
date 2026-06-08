@@ -39,15 +39,18 @@ static partial class ExceptionOptionsFormatter
                         
                         {
                             tokenizer.ReadStartArray();
-                            var list_Path = new global::System.Collections.Generic.List<ExceptionPathSegment>();
+                            var buf_Path = global::System.Array.Empty<ExceptionPathSegment>();
+                            var count_Path = 0;
                             while (!tokenizer.TryReadEndArray())
                             {
+                                if (count_Path == buf_Path.Length) global::System.Array.Resize(ref buf_Path, buf_Path.Length == 0 ? 4 : buf_Path.Length * 2);
                                 tokenizer.ReadStartObject();
                                 var elem = new ExceptionPathSegment();
                                 ExceptionPathSegmentFormatter.ReadInto(ref tokenizer, elem, options);
-                                list_Path.Add(elem);
+                                buf_Path[count_Path++] = elem;
                             }
-                            value.Path = list_Path.ToArray();
+                            if (count_Path != buf_Path.Length) global::System.Array.Resize(ref buf_Path, count_Path);
+                            value.Path = buf_Path;
                         }
                     }
                     else

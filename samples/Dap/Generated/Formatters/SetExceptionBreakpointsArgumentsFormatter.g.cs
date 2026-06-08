@@ -33,12 +33,15 @@ static partial class SetExceptionBreakpointsArgumentsFormatter
                     
                     {
                         tokenizer.ReadStartArray();
-                        var list_Filters = new global::System.Collections.Generic.List<string>();
+                        var buf_Filters = global::System.Array.Empty<string>();
+                        var count_Filters = 0;
                         while (!tokenizer.TryReadEndArray())
                         {
-                            list_Filters.Add(tokenizer.ReadString());
+                            if (count_Filters == buf_Filters.Length) global::System.Array.Resize(ref buf_Filters, buf_Filters.Length == 0 ? 4 : buf_Filters.Length * 2);
+                            buf_Filters[count_Filters++] = tokenizer.ReadString();
                         }
-                        value.Filters = list_Filters.ToArray();
+                        if (count_Filters != buf_Filters.Length) global::System.Array.Resize(ref buf_Filters, count_Filters);
+                        value.Filters = buf_Filters;
                     }
                     else
                     
@@ -59,15 +62,18 @@ static partial class SetExceptionBreakpointsArgumentsFormatter
                         
                         {
                             tokenizer.ReadStartArray();
-                            var list_FilterOptions = new global::System.Collections.Generic.List<ExceptionFilterOptions>();
+                            var buf_FilterOptions = global::System.Array.Empty<ExceptionFilterOptions>();
+                            var count_FilterOptions = 0;
                             while (!tokenizer.TryReadEndArray())
                             {
+                                if (count_FilterOptions == buf_FilterOptions.Length) global::System.Array.Resize(ref buf_FilterOptions, buf_FilterOptions.Length == 0 ? 4 : buf_FilterOptions.Length * 2);
                                 tokenizer.ReadStartObject();
                                 var elem = new ExceptionFilterOptions();
                                 ExceptionFilterOptionsFormatter.ReadInto(ref tokenizer, elem, options);
-                                list_FilterOptions.Add(elem);
+                                buf_FilterOptions[count_FilterOptions++] = elem;
                             }
-                            value.FilterOptions = list_FilterOptions.ToArray();
+                            if (count_FilterOptions != buf_FilterOptions.Length) global::System.Array.Resize(ref buf_FilterOptions, count_FilterOptions);
+                            value.FilterOptions = buf_FilterOptions;
                         }
                     }
                     else
@@ -89,15 +95,18 @@ static partial class SetExceptionBreakpointsArgumentsFormatter
                         
                         {
                             tokenizer.ReadStartArray();
-                            var list_ExceptionOptions = new global::System.Collections.Generic.List<ExceptionOptions>();
+                            var buf_ExceptionOptions = global::System.Array.Empty<ExceptionOptions>();
+                            var count_ExceptionOptions = 0;
                             while (!tokenizer.TryReadEndArray())
                             {
+                                if (count_ExceptionOptions == buf_ExceptionOptions.Length) global::System.Array.Resize(ref buf_ExceptionOptions, buf_ExceptionOptions.Length == 0 ? 4 : buf_ExceptionOptions.Length * 2);
                                 tokenizer.ReadStartObject();
                                 var elem = new ExceptionOptions();
                                 ExceptionOptionsFormatter.ReadInto(ref tokenizer, elem, options);
-                                list_ExceptionOptions.Add(elem);
+                                buf_ExceptionOptions[count_ExceptionOptions++] = elem;
                             }
-                            value.ExceptionOptions = list_ExceptionOptions.ToArray();
+                            if (count_ExceptionOptions != buf_ExceptionOptions.Length) global::System.Array.Resize(ref buf_ExceptionOptions, count_ExceptionOptions);
+                            value.ExceptionOptions = buf_ExceptionOptions;
                         }
                     }
                     else

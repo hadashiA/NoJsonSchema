@@ -31,15 +31,18 @@ static partial class DisassembleResponseBodyFormatter
                     
                     {
                         tokenizer.ReadStartArray();
-                        var list_Instructions = new global::System.Collections.Generic.List<DisassembledInstruction>();
+                        var buf_Instructions = global::System.Array.Empty<DisassembledInstruction>();
+                        var count_Instructions = 0;
                         while (!tokenizer.TryReadEndArray())
                         {
+                            if (count_Instructions == buf_Instructions.Length) global::System.Array.Resize(ref buf_Instructions, buf_Instructions.Length == 0 ? 4 : buf_Instructions.Length * 2);
                             tokenizer.ReadStartObject();
                             var elem = new DisassembledInstruction();
                             DisassembledInstructionFormatter.ReadInto(ref tokenizer, elem, options);
-                            list_Instructions.Add(elem);
+                            buf_Instructions[count_Instructions++] = elem;
                         }
-                        value.Instructions = list_Instructions.ToArray();
+                        if (count_Instructions != buf_Instructions.Length) global::System.Array.Resize(ref buf_Instructions, count_Instructions);
+                        value.Instructions = buf_Instructions;
                     }
                     else
                     

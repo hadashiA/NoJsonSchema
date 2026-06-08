@@ -31,15 +31,18 @@ static partial class ThreadsResponseBodyFormatter
                     
                     {
                         tokenizer.ReadStartArray();
-                        var list_Threads = new global::System.Collections.Generic.List<Thread>();
+                        var buf_Threads = global::System.Array.Empty<Thread>();
+                        var count_Threads = 0;
                         while (!tokenizer.TryReadEndArray())
                         {
+                            if (count_Threads == buf_Threads.Length) global::System.Array.Resize(ref buf_Threads, buf_Threads.Length == 0 ? 4 : buf_Threads.Length * 2);
                             tokenizer.ReadStartObject();
                             var elem = new Thread();
                             ThreadFormatter.ReadInto(ref tokenizer, elem, options);
-                            list_Threads.Add(elem);
+                            buf_Threads[count_Threads++] = elem;
                         }
-                        value.Threads = list_Threads.ToArray();
+                        if (count_Threads != buf_Threads.Length) global::System.Array.Resize(ref buf_Threads, count_Threads);
+                        value.Threads = buf_Threads;
                     }
                     else
                     

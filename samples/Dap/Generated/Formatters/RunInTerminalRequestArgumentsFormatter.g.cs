@@ -82,12 +82,15 @@ static partial class RunInTerminalRequestArgumentsFormatter
                     
                     {
                         tokenizer.ReadStartArray();
-                        var list_Args = new global::System.Collections.Generic.List<string>();
+                        var buf_Args = global::System.Array.Empty<string>();
+                        var count_Args = 0;
                         while (!tokenizer.TryReadEndArray())
                         {
-                            list_Args.Add(tokenizer.ReadString());
+                            if (count_Args == buf_Args.Length) global::System.Array.Resize(ref buf_Args, buf_Args.Length == 0 ? 4 : buf_Args.Length * 2);
+                            buf_Args[count_Args++] = tokenizer.ReadString();
                         }
-                        value.Args = list_Args.ToArray();
+                        if (count_Args != buf_Args.Length) global::System.Array.Resize(ref buf_Args, count_Args);
+                        value.Args = buf_Args;
                     }
                     else
                     
