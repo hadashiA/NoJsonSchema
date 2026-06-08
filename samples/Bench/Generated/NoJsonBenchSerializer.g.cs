@@ -26,13 +26,8 @@ public sealed class NoJsonFormatException : global::System.Exception
         Column = column;
     }
 
-    /// <summary>Byte offset within the input where the failure was detected.</summary>
     public int Position { get; }
-
-    /// <summary>1-based line number; 0 when not computed (e.g. constructed directly without source span).</summary>
     public int Line { get; }
-
-    /// <summary>1-based column number on <see cref="Line"/>; 0 when not computed.</summary>
     public int Column { get; }
 
     static string FormatMessage(string message, int position, int line, int column) =>
@@ -41,18 +36,11 @@ public sealed class NoJsonFormatException : global::System.Exception
             : message + " (pos " + position + ")";
 }
 
-/// <summary>
-/// Pull-style UTF-8 JSON tokenizer with a Read*/TryRead* only API surface:
-/// the caller (generated formatters) always knows the expected next token from the schema.
-/// </summary>
 ref struct Utf8JsonTokenizer
 {
 #if NET7_0_OR_GREATER
-    // C# 11 ref-byte field: zero indirection on hot reads.
     readonly ref byte head;
 #else
-    // Pre-net7 targets (netstandard 2.1) don't allow ref fields. Hold the span and recover the
-    // ref on-demand via MemoryMarshal.GetReference �JIT inlines `HeadRef()` to the same code.
     readonly global::System.ReadOnlySpan<byte> input;
 #endif
     readonly int length;
@@ -75,7 +63,6 @@ ref struct Utf8JsonTokenizer
         valueHasEscape = false;
     }
 
-    /// <summary>Recover a writable <c>ref byte</c> at index 0 of the input span.</summary>
     [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
     ref byte HeadRef() =>
 #if NET7_0_OR_GREATER
@@ -106,10 +93,6 @@ ref struct Utf8JsonTokenizer
         pos++;
     }
 
-    /// <summary>
-    /// Inside an object: read the next property name into <paramref name="nameUtf8"/> and the
-    /// trailing colon, or return false (and consume the closing '}') when the object ends.
-    /// </summary>
     public bool TryReadPropertyName(out global::System.ReadOnlySpan<byte> nameUtf8)
     {
         SkipWhitespace();
@@ -144,10 +127,6 @@ ref struct Utf8JsonTokenizer
         return true;
     }
 
-    /// <summary>
-    /// Inside an array: consume the optional ',' separator. Returns true and consumes the
-    /// closing ']' if the array ended; false when another element follows.
-    /// </summary>
     public bool TryReadEndArray()
     {
         SkipWhitespace();
@@ -166,7 +145,6 @@ ref struct Utf8JsonTokenizer
         return false;
     }
 
-    /// <summary>If the next token is JSON <c>null</c>, advance past it and return true.</summary>
     public bool TryReadNull()
     {
         SkipWhitespace();
@@ -189,10 +167,7 @@ ref struct Utf8JsonTokenizer
         return valueHasEscape ? DecodeString(span) : global::System.Text.Encoding.UTF8.GetString(span);
     }
 
-    /// <summary>
-    /// Read a JSON string and return its raw UTF-8 byte slice without allocating a <c>string</c>.
-    /// Returns false if the string contains backslash escapes �callers should then fall back to <see cref="ReadString"/>.
-    /// </summary>
+    /// <summary>Raw UTF-8 slice with no <c>string</c> allocation; returns false on escapes (caller falls back to <see cref="ReadString"/>).</summary>
     public bool TryReadStringRaw(out global::System.ReadOnlySpan<byte> rawBytes)
     {
         SkipWhitespace();
@@ -224,7 +199,7 @@ ref struct Utf8JsonTokenizer
             return false;
         }
         ThrowFormatException("Expected boolean, got 0x" + b.ToString("X2"));
-        return false; // unreachable �the C# flow analyser doesn't honour [DoesNotReturn] for CS0161.
+        return false; // unreachable; [DoesNotReturn] on ThrowFormatException isn't honoured for CS0161.
     }
 
     public sbyte ReadSByte()
@@ -354,7 +329,6 @@ ref struct Utf8JsonTokenizer
     public global::System.TimeSpan ReadTimeSpan()
     {
         var s = ReadString();
-        // ISO 8601 duration ("PT1H30M") via XmlConvert �JSON Schema's `format: duration` mandates ISO 8601.
         try { return global::System.Xml.XmlConvert.ToTimeSpan(s); }
         catch (global::System.FormatException) { ThrowFormatException("Invalid duration '" + s + "'"); return default; }
     }
@@ -395,7 +369,7 @@ ref struct Utf8JsonTokenizer
                 if (b == (byte)'{') { depth++; pos++; continue; }
                 if (b == (byte)'}')
                 {
-                    if (depth == 0) return false; // current object ended
+                    if (depth == 0) return false;
                     depth--; pos++; continue;
                 }
                 if (b == (byte)'[') { SkipObjectOrArray((byte)'[', (byte)']'); continue; }
@@ -403,7 +377,6 @@ ref struct Utf8JsonTokenizer
 
                 if (b != (byte)'"')
                 {
-                    // Skip scalar values quickly until we land on a property name or container.
                     while (pos < length)
                     {
                         var bb = ByteAt(pos);
@@ -414,14 +387,12 @@ ref struct Utf8JsonTokenizer
                     continue;
                 }
 
-                // We're on a string. Inside the *current* object (depth == 0) it's a property name;
-                // anywhere deeper it's a string value to skip past.
+                // depth == 0: property name; deeper: a string value to skip past.
                 ReadStringValue();
                 if (depth != 0) continue;
 
                 var nameSpan = SliceFrom(valueStart, valueEnd - valueStart);
 
-                // After the name, expect ':'.
                 SkipWhitespace();
                 if (pos >= length || ByteAt(pos) != (byte)':') return false;
                 pos++;
@@ -436,7 +407,6 @@ ref struct Utf8JsonTokenizer
                     return true;
                 }
 
-                // Not the discriminator �skip the value and continue scanning.
                 SkipWhitespace();
                 if (pos >= length) return false;
                 byte valStart = ByteAt(pos);
@@ -481,7 +451,7 @@ ref struct Utf8JsonTokenizer
             default:
                 if (b == (byte)'-' || (b >= (byte)'0' && b <= (byte)'9')) { ReadNumberValue(); return; }
                 ThrowFormatException("Unexpected byte 0x" + b.ToString("X2"));
-                return; // unreachable
+                return;
         }
     }
 
@@ -517,17 +487,12 @@ ref struct Utf8JsonTokenizer
     [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
     void SkipWhitespace()
     {
-        // Fast exit: pos almost always already sits on a non-whitespace byte �either the input is
-        // compact (no insignificant whitespace), or an upstream peek (TryReadPropertyName /
-        // TryReadEndArray / TryReadNull) already skipped it before the value reader's own call. A
-        // single scalar test short-circuits both the redundant re-scan and the SIMD setup cost in
-        // that overwhelmingly common case; only an actual whitespace run falls through to the loop.
+        // Scalar fast-exit: pos usually already sits on non-whitespace (compact input, or an
+        // upstream peek already skipped), so skip the SIMD setup cost in the common case.
         if (pos >= length) return;
         byte b0 = ByteAt(pos);
         if (b0 != (byte)' ' && b0 != (byte)'\t' && b0 != (byte)'\n' && b0 != (byte)'\r') return;
 #if NET7_0_OR_GREATER
-        // We're on whitespace, so a run likely follows �scan 16 bytes at a time for the first
-        // non-whitespace byte. JSON insignificant whitespace is exactly { ' ', '\t', '\n', '\r' }.
         if (global::System.Runtime.Intrinsics.Vector128.IsHardwareAccelerated)
         {
             while (pos + 16 <= length)
@@ -537,9 +502,8 @@ ref struct Utf8JsonTokenizer
                        | global::System.Runtime.Intrinsics.Vector128.Equals(v, global::System.Runtime.Intrinsics.Vector128.Create((byte)'\t'))
                        | global::System.Runtime.Intrinsics.Vector128.Equals(v, global::System.Runtime.Intrinsics.Vector128.Create((byte)'\n'))
                        | global::System.Runtime.Intrinsics.Vector128.Equals(v, global::System.Runtime.Intrinsics.Vector128.Create((byte)'\r'));
-                // One bit per lane: set = whitespace. 0xFFFF means the whole block is whitespace.
                 uint mask = global::System.Runtime.Intrinsics.Vector128.ExtractMostSignificantBits(ws);
-                if (mask != 0xFFFFu)
+                if (mask != 0xFFFFu) // 0xFFFF = all 16 lanes whitespace
                 {
                     pos += global::System.Numerics.BitOperations.TrailingZeroCount(~mask & 0xFFFFu);
                     return;
@@ -556,18 +520,16 @@ ref struct Utf8JsonTokenizer
         }
     }
 
-    /// <summary>Consume <c>"..."</c> at <c>pos</c> (opening quote required), recording valueStart/valueEnd.</summary>
     void ReadStringValue()
     {
-        pos++; // skip opening quote
+        pos++; // opening quote
         valueStart = pos;
         valueHasEscape = false;
         while (pos < length)
         {
 #if NET7_0_OR_GREATER
-            // SIMD fast path: scan 16 bytes at a time for the first "interesting" byte �            // the closing quote ('"'), an escape ('\\'), or a control char (< 0x20). Everything
-            // else is ordinary string content we can skip over in bulk. Re-entered after each
-            // escape so strings with escapes still get the vector scan for their remaining runs.
+            // Scan 16 bytes at a time for the closing quote, an escape, or a control char;
+            // re-entered after each escape so escaped strings keep vectorizing their runs.
             if (global::System.Runtime.Intrinsics.Vector128.IsHardwareAccelerated)
             {
                 while (pos + 16 <= length)
@@ -581,7 +543,7 @@ ref struct Utf8JsonTokenizer
                     if (mask != 0)
                     {
                         pos += global::System.Numerics.BitOperations.TrailingZeroCount(mask);
-                        break; // hand the located byte to the scalar handler below
+                        break;
                     }
                     pos += 16;
                 }
@@ -632,7 +594,7 @@ ref struct Utf8JsonTokenizer
     void SkipObjectOrArray(byte open, byte close)
     {
         int depth = 1;
-        pos++; // consume the opening byte
+        pos++; // opening byte
         while (pos < length && depth > 0)
         {
             byte b = ByteAt(pos);
@@ -698,10 +660,8 @@ ref struct Utf8JsonBufferWriter
 {
     readonly global::System.Buffers.IBufferWriter<byte> writer;
 #if NET7_0_OR_GREATER
-    // C# 11 ref-byte field �moves forward via `Unsafe.Add` on every Advance.
     ref byte bufferReference;
 #else
-    // Pre-net7: hold the rented span (no separate offset �slicing advances the view).
     global::System.Span<byte> bufferReference;
 #endif
     int spanRemaining;
@@ -736,9 +696,7 @@ ref struct Utf8JsonBufferWriter
         }
     }
 
-    /// <summary>Writable <c>ref byte</c> at <paramref name="offset"/> past the current write head.
-    /// JIT-inlines to a single ADD on net7+, and to <c>MemoryMarshal.GetReference + offset</c> on
-    /// netstandard. Callers use it as the LHS of an assignment (e.g. <c>GetByte(3) = b;</c>).</summary>
+    // Writable ref byte at offset past the write head; used as an assignment LHS (`GetByte(3) = b;`).
     [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
     ref byte GetByte(int offset) =>
 #if NET7_0_OR_GREATER
@@ -762,10 +720,7 @@ ref struct Utf8JsonBufferWriter
         needsSeparator = false;
     }
 
-    /// <summary>
-    /// Writes <paramref name="contentInsideQuotes"/> as a JSON string value. The bytes must be valid UTF-8
-    /// and contain no characters that would require escaping (used for enum members and other fixed literals).
-    /// </summary>
+    /// <summary>Writes pre-validated UTF-8 with no escaping (enum members, fixed literals).</summary>
     public void WriteRawStringValue(scoped global::System.ReadOnlySpan<byte> contentInsideQuotes)
     {
         MaybeSeparator();
@@ -804,7 +759,6 @@ ref struct Utf8JsonBufferWriter
 
     public void WriteTimeSpan(global::System.TimeSpan v)
     {
-        // Emit ISO 8601 duration (`P…T…`) so it round-trips through `format: duration` consumers.
         WriteString(global::System.Xml.XmlConvert.ToString(v));
     }
 
@@ -984,7 +938,6 @@ ref struct Utf8JsonBufferWriter
 #if NET7_0_OR_GREATER
         var destSpan = global::System.Runtime.InteropServices.MemoryMarshal.CreateSpan(ref bufferReference, chars.Length);
 #else
-        // Slice already-pinned span �bufferReference's start is already the write head.
         var destSpan = bufferReference.Slice(0, chars.Length);
 #endif
         int written = global::System.Text.Encoding.UTF8.GetBytes(chars, destSpan);
@@ -1059,7 +1012,6 @@ ref struct Utf8JsonBufferWriter
 #if NET7_0_OR_GREATER
         bufferReference = ref global::System.Runtime.CompilerServices.Unsafe.Add(ref bufferReference, n);
 #else
-        // Span tracks the head itself via slicing �no separate offset to bump.
         bufferReference = bufferReference.Slice(n);
 #endif
         spanRemaining -= n;
