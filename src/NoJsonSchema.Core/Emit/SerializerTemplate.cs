@@ -515,40 +515,42 @@ ref struct Utf8JsonTokenizer
             ref global::System.Runtime.CompilerServices.Unsafe.Add(ref HeadRef(), offset),
             len);
 
+#if NET8_0_OR_GREATER
+    // Vectorized membership scans via the BCL (AVX2/AVX-512 internally) beat a hand-rolled Vector128.
+    static readonly global::System.Buffers.SearchValues<byte> s_whitespace =
+        global::System.Buffers.SearchValues.Create(" \t\n\r"u8);
+    static readonly global::System.Buffers.SearchValues<byte> s_stringDelimiters =
+        global::System.Buffers.SearchValues.Create(StringDelimiterBytes());
+
+    static byte[] StringDelimiterBytes()
+    {
+        var bytes = new byte[34]; // control chars 0x00..0x1F, plus '"' and '\\'
+        for (int i = 0; i < 0x20; i++) bytes[i] = (byte)i;
+        bytes[0x20] = (byte)'"';
+        bytes[0x21] = (byte)'\\';
+        return bytes;
+    }
+#endif
+
     [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
     void SkipWhitespace()
     {
         // Scalar fast-exit: pos usually already sits on non-whitespace (compact input, or an
-        // upstream peek already skipped), so skip the SIMD setup cost in the common case.
+        // upstream peek already skipped), so avoid the IndexOfAnyExcept call in the common case.
         if (pos >= length) return;
         byte b0 = ByteAt(pos);
         if (b0 != (byte)' ' && b0 != (byte)'\t' && b0 != (byte)'\n' && b0 != (byte)'\r') return;
-#if NET7_0_OR_GREATER
-        if (global::System.Runtime.Intrinsics.Vector128.IsHardwareAccelerated)
-        {
-            while (pos + 16 <= length)
-            {
-                var v = global::System.Runtime.Intrinsics.Vector128.LoadUnsafe(ref HeadRef(), (nuint)pos);
-                var ws = global::System.Runtime.Intrinsics.Vector128.Equals(v, global::System.Runtime.Intrinsics.Vector128.Create((byte)' '))
-                       | global::System.Runtime.Intrinsics.Vector128.Equals(v, global::System.Runtime.Intrinsics.Vector128.Create((byte)'\t'))
-                       | global::System.Runtime.Intrinsics.Vector128.Equals(v, global::System.Runtime.Intrinsics.Vector128.Create((byte)'\n'))
-                       | global::System.Runtime.Intrinsics.Vector128.Equals(v, global::System.Runtime.Intrinsics.Vector128.Create((byte)'\r'));
-                uint mask = global::System.Runtime.Intrinsics.Vector128.ExtractMostSignificantBits(ws);
-                if (mask != 0xFFFFu) // 0xFFFF = all 16 lanes whitespace
-                {
-                    pos += global::System.Numerics.BitOperations.TrailingZeroCount(~mask & 0xFFFFu);
-                    return;
-                }
-                pos += 16;
-            }
-        }
-#endif
+#if NET8_0_OR_GREATER
+        int rel = global::System.MemoryExtensions.IndexOfAnyExcept(SliceFrom(pos, length - pos), s_whitespace);
+        pos = rel < 0 ? length : pos + rel;
+#else
         while (pos < length)
         {
             byte b = ByteAt(pos);
             if (b == (byte)' ' || b == (byte)'\t' || b == (byte)'\n' || b == (byte)'\r') pos++;
             else break;
         }
+#endif
     }
 
     void ReadStringValue()
@@ -558,28 +560,11 @@ ref struct Utf8JsonTokenizer
         valueHasEscape = false;
         while (pos < length)
         {
-#if NET7_0_OR_GREATER
-            // Scan 16 bytes at a time for the closing quote, an escape, or a control char;
-            // re-entered after each escape so escaped strings keep vectorizing their runs.
-            if (global::System.Runtime.Intrinsics.Vector128.IsHardwareAccelerated)
-            {
-                while (pos + 16 <= length)
-                {
-                    var v = global::System.Runtime.Intrinsics.Vector128.LoadUnsafe(ref HeadRef(), (nuint)pos);
-                    var hit = global::System.Runtime.Intrinsics.Vector128.Equals(v, global::System.Runtime.Intrinsics.Vector128.Create((byte)'"'))
-                            | global::System.Runtime.Intrinsics.Vector128.Equals(v, global::System.Runtime.Intrinsics.Vector128.Create((byte)'\\'))
-                            // LessThan on byte is unsigned, so this matches control chars 0x00..0x1F only.
-                            | global::System.Runtime.Intrinsics.Vector128.LessThan(v, global::System.Runtime.Intrinsics.Vector128.Create((byte)0x20));
-                    uint mask = global::System.Runtime.Intrinsics.Vector128.ExtractMostSignificantBits(hit);
-                    if (mask != 0)
-                    {
-                        pos += global::System.Numerics.BitOperations.TrailingZeroCount(mask);
-                        break;
-                    }
-                    pos += 16;
-                }
-                if (pos >= length) break;
-            }
+#if NET8_0_OR_GREATER
+            // Jump to the next closing quote / escape / control char; re-entered after each escape.
+            int rel = global::System.MemoryExtensions.IndexOfAny(SliceFrom(pos, length - pos), s_stringDelimiters);
+            if (rel < 0) break;
+            pos += rel;
 #endif
             byte b = ByteAt(pos);
             if (b == (byte)'"')
