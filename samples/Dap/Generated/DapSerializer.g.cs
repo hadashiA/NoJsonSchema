@@ -542,6 +542,29 @@ ref struct Utf8JsonTokenizer
     [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
     void SkipWhitespace()
     {
+#if NET7_0_OR_GREATER
+        // SIMD fast path: scan 16 bytes at a time for the first non-whitespace byte.
+        // JSON insignificant whitespace is exactly { ' ', '\t', '\n', '\r' }.
+        if (global::System.Runtime.Intrinsics.Vector128.IsHardwareAccelerated)
+        {
+            while (pos + 16 <= length)
+            {
+                var v = global::System.Runtime.Intrinsics.Vector128.LoadUnsafe(ref HeadRef(), (nuint)pos);
+                var ws = global::System.Runtime.Intrinsics.Vector128.Equals(v, global::System.Runtime.Intrinsics.Vector128.Create((byte)' '))
+                       | global::System.Runtime.Intrinsics.Vector128.Equals(v, global::System.Runtime.Intrinsics.Vector128.Create((byte)'\t'))
+                       | global::System.Runtime.Intrinsics.Vector128.Equals(v, global::System.Runtime.Intrinsics.Vector128.Create((byte)'\n'))
+                       | global::System.Runtime.Intrinsics.Vector128.Equals(v, global::System.Runtime.Intrinsics.Vector128.Create((byte)'\r'));
+                // One bit per lane: set = whitespace. 0xFFFF means the whole block is whitespace.
+                uint mask = global::System.Runtime.Intrinsics.Vector128.ExtractMostSignificantBits(ws);
+                if (mask != 0xFFFFu)
+                {
+                    pos += global::System.Numerics.BitOperations.TrailingZeroCount(~mask & 0xFFFFu);
+                    return;
+                }
+                pos += 16;
+            }
+        }
+#endif
         while (pos < length)
         {
             byte b = ByteAt(pos);
@@ -558,6 +581,31 @@ ref struct Utf8JsonTokenizer
         valueHasEscape = false;
         while (pos < length)
         {
+#if NET7_0_OR_GREATER
+            // SIMD fast path: scan 16 bytes at a time for the first "interesting" byte —
+            // the closing quote ('"'), an escape ('\\'), or a control char (< 0x20). Everything
+            // else is ordinary string content we can skip over in bulk. Re-entered after each
+            // escape so strings with escapes still get the vector scan for their remaining runs.
+            if (global::System.Runtime.Intrinsics.Vector128.IsHardwareAccelerated)
+            {
+                while (pos + 16 <= length)
+                {
+                    var v = global::System.Runtime.Intrinsics.Vector128.LoadUnsafe(ref HeadRef(), (nuint)pos);
+                    var hit = global::System.Runtime.Intrinsics.Vector128.Equals(v, global::System.Runtime.Intrinsics.Vector128.Create((byte)'"'))
+                            | global::System.Runtime.Intrinsics.Vector128.Equals(v, global::System.Runtime.Intrinsics.Vector128.Create((byte)'\\'))
+                            // LessThan on byte is unsigned, so this matches control chars 0x00..0x1F only.
+                            | global::System.Runtime.Intrinsics.Vector128.LessThan(v, global::System.Runtime.Intrinsics.Vector128.Create((byte)0x20));
+                    uint mask = global::System.Runtime.Intrinsics.Vector128.ExtractMostSignificantBits(hit);
+                    if (mask != 0)
+                    {
+                        pos += global::System.Numerics.BitOperations.TrailingZeroCount(mask);
+                        break; // hand the located byte to the scalar handler below
+                    }
+                    pos += 16;
+                }
+                if (pos >= length) break;
+            }
+#endif
             byte b = ByteAt(pos);
             if (b == (byte)'"')
             {
