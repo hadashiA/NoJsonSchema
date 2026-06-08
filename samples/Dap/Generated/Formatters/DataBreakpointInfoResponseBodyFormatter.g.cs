@@ -88,12 +88,15 @@ static partial class DataBreakpointInfoResponseBodyFormatter
                         
                         {
                             tokenizer.ReadStartArray();
-                            var list_AccessTypes = new global::System.Collections.Generic.List<DataBreakpointAccessType>();
+                            var buf_AccessTypes = global::System.Array.Empty<DataBreakpointAccessType>();
+                            var count_AccessTypes = 0;
                             while (!tokenizer.TryReadEndArray())
                             {
-                                list_AccessTypes.Add(DataBreakpointAccessTypeFormatter.ReadValue(ref tokenizer));
+                                if (count_AccessTypes == buf_AccessTypes.Length) global::System.Array.Resize(ref buf_AccessTypes, buf_AccessTypes.Length == 0 ? 4 : buf_AccessTypes.Length * 2);
+                                buf_AccessTypes[count_AccessTypes++] = DataBreakpointAccessTypeFormatter.ReadValue(ref tokenizer);
                             }
-                            value.AccessTypes = list_AccessTypes.ToArray();
+                            if (count_AccessTypes != buf_AccessTypes.Length) global::System.Array.Resize(ref buf_AccessTypes, count_AccessTypes);
+                            value.AccessTypes = buf_AccessTypes;
                         }
                     }
                     else

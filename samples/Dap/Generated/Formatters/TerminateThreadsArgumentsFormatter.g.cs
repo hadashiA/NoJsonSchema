@@ -38,12 +38,15 @@ static partial class TerminateThreadsArgumentsFormatter
                         
                         {
                             tokenizer.ReadStartArray();
-                            var list_ThreadIds = new global::System.Collections.Generic.List<int>();
+                            var buf_ThreadIds = global::System.Array.Empty<int>();
+                            var count_ThreadIds = 0;
                             while (!tokenizer.TryReadEndArray())
                             {
-                                list_ThreadIds.Add(tokenizer.ReadInt32());
+                                if (count_ThreadIds == buf_ThreadIds.Length) global::System.Array.Resize(ref buf_ThreadIds, buf_ThreadIds.Length == 0 ? 4 : buf_ThreadIds.Length * 2);
+                                buf_ThreadIds[count_ThreadIds++] = tokenizer.ReadInt32();
                             }
-                            value.ThreadIds = list_ThreadIds.ToArray();
+                            if (count_ThreadIds != buf_ThreadIds.Length) global::System.Array.Resize(ref buf_ThreadIds, count_ThreadIds);
+                            value.ThreadIds = buf_ThreadIds;
                         }
                     }
                     else

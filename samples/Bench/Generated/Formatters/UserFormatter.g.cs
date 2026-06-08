@@ -63,12 +63,15 @@ static partial class UserFormatter
                         
                         {
                             tokenizer.ReadStartArray();
-                            var list_Tags = new global::System.Collections.Generic.List<string>();
+                            var buf_Tags = global::System.Array.Empty<string>();
+                            var count_Tags = 0;
                             while (!tokenizer.TryReadEndArray())
                             {
-                                list_Tags.Add(tokenizer.ReadString());
+                                if (count_Tags == buf_Tags.Length) global::System.Array.Resize(ref buf_Tags, buf_Tags.Length == 0 ? 4 : buf_Tags.Length * 2);
+                                buf_Tags[count_Tags++] = tokenizer.ReadString();
                             }
-                            value.Tags = list_Tags.ToArray();
+                            if (count_Tags != buf_Tags.Length) global::System.Array.Resize(ref buf_Tags, count_Tags);
+                            value.Tags = buf_Tags;
                         }
                     }
                     else
@@ -129,12 +132,15 @@ static partial class UserFormatter
                         
                         {
                             tokenizer.ReadStartArray();
-                            var list_Scores = new global::System.Collections.Generic.List<long>();
+                            var buf_Scores = global::System.Array.Empty<long>();
+                            var count_Scores = 0;
                             while (!tokenizer.TryReadEndArray())
                             {
-                                list_Scores.Add(tokenizer.ReadInt64());
+                                if (count_Scores == buf_Scores.Length) global::System.Array.Resize(ref buf_Scores, buf_Scores.Length == 0 ? 4 : buf_Scores.Length * 2);
+                                buf_Scores[count_Scores++] = tokenizer.ReadInt64();
                             }
-                            value.Scores = list_Scores.ToArray();
+                            if (count_Scores != buf_Scores.Length) global::System.Array.Resize(ref buf_Scores, count_Scores);
+                            value.Scores = buf_Scores;
                         }
                     }
                     else

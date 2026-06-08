@@ -344,37 +344,50 @@ public static class FormatterEmitter
         }
     }
 
-    static void EmitReadArrayInto(SourceWriter w, PropertyDescriptor p, TypeRef.Array arr, EmitContext ctx)
+    static void EmitReadArrayInto(SourceWriter w, PropertyDescriptor p, TypeRef.Array arr, EmitContext ctx) =>
+        EmitReadArrayBuffer(w, p.Name, arr, $"value.{p.Name}", ctx);
+
+    /// <summary>
+    /// Read a JSON array into an exact-size <c>T[]</c> without the <c>List&lt;T&gt; + ToArray()</c>
+    /// double-allocation: grow a raw array by doubling, then trim once at the end (skipping the
+    /// trim copy entirely when the element count lands exactly on the capacity).
+    /// </summary>
+    static void EmitReadArrayBuffer(SourceWriter w, string suffix, TypeRef.Array arr, string assignTarget, EmitContext ctx)
     {
         var elementType = TypeExpression.Render(arr.Element);
+        var buf = $"buf_{suffix}";
+        var cnt = $"count_{suffix}";
         w.WriteLine("tokenizer.ReadStartArray();");
-        w.WriteLine($"var list_{p.Name} = new global::System.Collections.Generic.List<{elementType}>();");
+        w.WriteLine($"var {buf} = global::System.Array.Empty<{elementType}>();");
+        w.WriteLine($"var {cnt} = 0;");
         using (w.Block($"while (!tokenizer.TryReadEndArray())"))
         {
-            EmitReadElementInto(w, arr.Element, $"list_{p.Name}", ctx);
+            w.WriteLine($"if ({cnt} == {buf}.Length) global::System.Array.Resize(ref {buf}, {buf}.Length == 0 ? 4 : {buf}.Length * 2);");
+            EmitReadElementAssign(w, arr.Element, buf, cnt, ctx);
         }
-        w.WriteLine($"value.{p.Name} = list_{p.Name}.ToArray();");
+        w.WriteLine($"if ({cnt} != {buf}.Length) global::System.Array.Resize(ref {buf}, {cnt});");
+        w.WriteLine($"{assignTarget} = {buf};");
     }
 
-    static void EmitReadElementInto(SourceWriter w, TypeRef element, string listVar, EmitContext ctx)
+    static void EmitReadElementAssign(SourceWriter w, TypeRef element, string buf, string cnt, EmitContext ctx)
     {
         switch (Unwrap(element))
         {
             case TypeRef.Primitive prim:
-                w.WriteLine($"{listVar}.Add({ReadPrimitiveExpr(prim)});");
+                w.WriteLine($"{buf}[{cnt}++] = {ReadPrimitiveExpr(prim)};");
                 break;
             case TypeRef.Named named when ctx.IsEnum(named.Name):
-                w.WriteLine($"{listVar}.Add({named.Name}Formatter.ReadValue(ref tokenizer));");
+                w.WriteLine($"{buf}[{cnt}++] = {named.Name}Formatter.ReadValue(ref tokenizer);");
                 break;
             case TypeRef.Named named when ctx.IsStruct(named.Name):
                 w.WriteLine("tokenizer.ReadStartObject();");
-                w.WriteLine($"{listVar}.Add({named.Name}Formatter.ReadValue(ref tokenizer, options));");
+                w.WriteLine($"{buf}[{cnt}++] = {named.Name}Formatter.ReadValue(ref tokenizer, options);");
                 break;
             case TypeRef.Named named:
                 w.WriteLine("tokenizer.ReadStartObject();");
                 w.WriteLine($"var elem = new {named.Name}();");
                 w.WriteLine($"{named.Name}Formatter.ReadInto(ref tokenizer, elem, options);");
-                w.WriteLine($"{listVar}.Add(elem);");
+                w.WriteLine($"{buf}[{cnt}++] = elem;");
                 break;
             default:
                 w.WriteLine("tokenizer.SkipValue(); // unsupported element");
@@ -773,16 +786,7 @@ public static class FormatterEmitter
                 w.WriteLine($"__v_{p.Name} = sub_{p.Name};");
                 break;
             case TypeRef.Array arr:
-                {
-                    var elementType = TypeExpression.Render(arr.Element);
-                    w.WriteLine("tokenizer.ReadStartArray();");
-                    w.WriteLine($"var list_{p.Name} = new global::System.Collections.Generic.List<{elementType}>();");
-                    using (w.Block("while (!tokenizer.TryReadEndArray())"))
-                    {
-                        EmitReadElementInto(w, arr.Element, $"list_{p.Name}", ctx);
-                    }
-                    w.WriteLine($"__v_{p.Name} = list_{p.Name}.ToArray();");
-                }
+                EmitReadArrayBuffer(w, p.Name, arr, $"__v_{p.Name}", ctx);
                 break;
             case TypeRef.Any:
                 w.WriteLine("tokenizer.SkipValue();");

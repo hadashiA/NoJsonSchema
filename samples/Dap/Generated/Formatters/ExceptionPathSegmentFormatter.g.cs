@@ -32,12 +32,15 @@ static partial class ExceptionPathSegmentFormatter
                     
                     {
                         tokenizer.ReadStartArray();
-                        var list_Names = new global::System.Collections.Generic.List<string>();
+                        var buf_Names = global::System.Array.Empty<string>();
+                        var count_Names = 0;
                         while (!tokenizer.TryReadEndArray())
                         {
-                            list_Names.Add(tokenizer.ReadString());
+                            if (count_Names == buf_Names.Length) global::System.Array.Resize(ref buf_Names, buf_Names.Length == 0 ? 4 : buf_Names.Length * 2);
+                            buf_Names[count_Names++] = tokenizer.ReadString();
                         }
-                        value.Names = list_Names.ToArray();
+                        if (count_Names != buf_Names.Length) global::System.Array.Resize(ref buf_Names, count_Names);
+                        value.Names = buf_Names;
                     }
                     else
                     

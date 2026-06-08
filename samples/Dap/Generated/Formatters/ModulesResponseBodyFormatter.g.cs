@@ -32,15 +32,18 @@ static partial class ModulesResponseBodyFormatter
                     
                     {
                         tokenizer.ReadStartArray();
-                        var list_Modules = new global::System.Collections.Generic.List<Module>();
+                        var buf_Modules = global::System.Array.Empty<Module>();
+                        var count_Modules = 0;
                         while (!tokenizer.TryReadEndArray())
                         {
+                            if (count_Modules == buf_Modules.Length) global::System.Array.Resize(ref buf_Modules, buf_Modules.Length == 0 ? 4 : buf_Modules.Length * 2);
                             tokenizer.ReadStartObject();
                             var elem = new Module();
                             ModuleFormatter.ReadInto(ref tokenizer, elem, options);
-                            list_Modules.Add(elem);
+                            buf_Modules[count_Modules++] = elem;
                         }
-                        value.Modules = list_Modules.ToArray();
+                        if (count_Modules != buf_Modules.Length) global::System.Array.Resize(ref buf_Modules, count_Modules);
+                        value.Modules = buf_Modules;
                     }
                     else
                     

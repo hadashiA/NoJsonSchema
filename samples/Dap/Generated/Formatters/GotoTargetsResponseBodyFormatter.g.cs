@@ -31,15 +31,18 @@ static partial class GotoTargetsResponseBodyFormatter
                     
                     {
                         tokenizer.ReadStartArray();
-                        var list_Targets = new global::System.Collections.Generic.List<GotoTarget>();
+                        var buf_Targets = global::System.Array.Empty<GotoTarget>();
+                        var count_Targets = 0;
                         while (!tokenizer.TryReadEndArray())
                         {
+                            if (count_Targets == buf_Targets.Length) global::System.Array.Resize(ref buf_Targets, buf_Targets.Length == 0 ? 4 : buf_Targets.Length * 2);
                             tokenizer.ReadStartObject();
                             var elem = new GotoTarget();
                             GotoTargetFormatter.ReadInto(ref tokenizer, elem, options);
-                            list_Targets.Add(elem);
+                            buf_Targets[count_Targets++] = elem;
                         }
-                        value.Targets = list_Targets.ToArray();
+                        if (count_Targets != buf_Targets.Length) global::System.Array.Resize(ref buf_Targets, count_Targets);
+                        value.Targets = buf_Targets;
                     }
                     else
                     

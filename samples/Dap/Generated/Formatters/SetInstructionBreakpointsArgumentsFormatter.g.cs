@@ -31,15 +31,18 @@ static partial class SetInstructionBreakpointsArgumentsFormatter
                     
                     {
                         tokenizer.ReadStartArray();
-                        var list_Breakpoints = new global::System.Collections.Generic.List<InstructionBreakpoint>();
+                        var buf_Breakpoints = global::System.Array.Empty<InstructionBreakpoint>();
+                        var count_Breakpoints = 0;
                         while (!tokenizer.TryReadEndArray())
                         {
+                            if (count_Breakpoints == buf_Breakpoints.Length) global::System.Array.Resize(ref buf_Breakpoints, buf_Breakpoints.Length == 0 ? 4 : buf_Breakpoints.Length * 2);
                             tokenizer.ReadStartObject();
                             var elem = new InstructionBreakpoint();
                             InstructionBreakpointFormatter.ReadInto(ref tokenizer, elem, options);
-                            list_Breakpoints.Add(elem);
+                            buf_Breakpoints[count_Breakpoints++] = elem;
                         }
-                        value.Breakpoints = list_Breakpoints.ToArray();
+                        if (count_Breakpoints != buf_Breakpoints.Length) global::System.Array.Resize(ref buf_Breakpoints, count_Breakpoints);
+                        value.Breakpoints = buf_Breakpoints;
                     }
                     else
                     

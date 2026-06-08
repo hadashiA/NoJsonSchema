@@ -47,9 +47,9 @@ The generated parser/emitter is also built for hot paths:
 | | NoJsonSchema | System.Text.Json source-gen |
 |---|---:|---:|
 | Generated code runtime deps | **none** | `System.Text.Json` |
-| Deserialize (8-property DTO) | **416 ns** (1.36× faster) | 565 ns |
-| Serialize (same DTO) | **211 ns** (1.29× faster) | 271 ns |
-| Allocations on deserialize | **856 B** (36% less) | 1328 B |
+| Deserialize (8-property DTO) | **355 ns** (1.63× faster) | 577 ns |
+| Serialize (same DTO) | **210 ns** (1.34× faster) | 282 ns |
+| Allocations on deserialize | **792 B** (40% less) | 1328 B |
 | Unity / IL2CPP / AOT | ✅ | ✅ (limited) |
 
 (Benchmark: Apple M4 / .NET 10, ShortRun. See [`samples/Bench/`](samples/Bench).)
@@ -322,6 +322,7 @@ Generated/
 Hot-path details (commentary lives in [`Emit/SerializerTemplate.cs`](src/NoJsonSchema.Core/Emit/SerializerTemplate.cs)):
 
 - **Tokenizer / Writer** are `ref struct`s with a `ref byte head` field on net7+ (Span<byte> + slicing on netstandard 2.1). `Unsafe.Add` / `Unsafe.CopyBlockUnaligned` instead of span-indexed access — per-byte bounds checks are elided on the hot path.
+- **Vectorized scanning** (net8+): whitespace skipping uses `IndexOfAnyExcept` and the string-terminal search (`"` / `\` / control char) uses a cached `SearchValues<byte>` — both AVX2/AVX-512-accelerated in the BCL. A scalar single-byte fast-exit guards the common case so compact input — and the redundant skips after a peek — pay no call cost.
 - **WriteString fast path**: bulk `Encoding.UTF8.GetBytes(chars, span)` for ASCII-safe runs, escape only on demand.
 - **Property dispatch** is bucketed by UTF-8 byte length — `switch (__name.Length)` then `SequenceEqual` within bucket. Mismatches short-circuit fast.
 - **Generic dispatch** routes through a per-`T` static `Cache<T>` with two delegate fields. The `typeof(T) ==` resolution runs once per CLR generic instantiation; subsequent calls are a single static-field load + one delegate invocation. The Cache + delegate types are private-nested in the Serializer, so multiple generated namespaces in the same assembly don't collide.

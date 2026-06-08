@@ -140,15 +140,18 @@ static partial class ExceptionDetailsFormatter
                         
                         {
                             tokenizer.ReadStartArray();
-                            var list_InnerException = new global::System.Collections.Generic.List<ExceptionDetails>();
+                            var buf_InnerException = global::System.Array.Empty<ExceptionDetails>();
+                            var count_InnerException = 0;
                             while (!tokenizer.TryReadEndArray())
                             {
+                                if (count_InnerException == buf_InnerException.Length) global::System.Array.Resize(ref buf_InnerException, buf_InnerException.Length == 0 ? 4 : buf_InnerException.Length * 2);
                                 tokenizer.ReadStartObject();
                                 var elem = new ExceptionDetails();
                                 ExceptionDetailsFormatter.ReadInto(ref tokenizer, elem, options);
-                                list_InnerException.Add(elem);
+                                buf_InnerException[count_InnerException++] = elem;
                             }
-                            value.InnerException = list_InnerException.ToArray();
+                            if (count_InnerException != buf_InnerException.Length) global::System.Array.Resize(ref buf_InnerException, count_InnerException);
+                            value.InnerException = buf_InnerException;
                         }
                     }
                     else
